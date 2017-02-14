@@ -1,0 +1,6 @@
+boto3
+click
+git+https://github.com/fchollet/keras.git
+numpy
+pytest
+tensorflow
