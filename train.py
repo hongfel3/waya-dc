@@ -110,7 +110,7 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
 
                 writer.write(example.SerializeToString())
 
-            writer.close()
+        writer.close()
 
 
 def get_model(model_input_tensor, nb_classes, base_model_name):
