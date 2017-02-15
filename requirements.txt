@@ -1,7 +1,8 @@
 boto3
 click
 git+https://github.com/wayaai/deep-learning-utils.git
-git+https://github.com/fchollet/keras.git
+git+https://github.com/wayaai/keras.git
 numpy
 pytest
+sklearn
 tensorflow

@@ -4,6 +4,7 @@ Image classification using deep convolutional neural networks.
 Note: Only Python 3 support currently.
 """
 
+import collections
 import math
 import os
 
@@ -15,6 +16,7 @@ from keras import models
 from keras.preprocessing import image
 from keras.utils import np_utils
 import numpy as np
+from sklearn import metrics
 import tensorflow as tf
 
 from dlutils import plot_image_batch_w_labels
@@ -27,6 +29,7 @@ from wayadc.utils import helpers
 
 path = os.path.dirname(os.path.abspath(__file__))
 cache_dir = os.path.join(path, 'cache')  # cached base model outputs, model checkpoints, etc... saved in this dir
+data_dir = os.path.join(path, 'data')  # data sets are saved in this dir
 cached_base_model_outputs = os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords')
 model_checkpoint = os.path.join(cache_dir, 'model_checkpoint.h5')  # models are saved during training as they improve
 
@@ -128,8 +131,8 @@ def get_model(model_input_tensor, nb_classes, base_model_name):
 
 
 @click.command()
-@click.option('--train_dir', type=str, help='Full path of the directory containing the train data set.')
-@click.option('--valid_dir', type=str, help='Full path of the directory containing the valid data set.')
+@click.option('--valid_dir', type=str, default='dermnetnz-scraped',
+              help='Sub-directory containing the valid data set (located in `data_dir`).')
 @click.option('--cache_base_model_features', default=False, type=bool,
               help='Cache base model outputs for train and valid data sets to greatly reduce training times.')
 @click.option('--train_top_only', default=False, type=bool,
@@ -138,7 +141,16 @@ def get_model(model_input_tensor, nb_classes, base_model_name):
               help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
 @click.option('--fine_tune', default=False, type=bool,
               help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
-def main(train_dir, valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune):
+def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune):
+    # ...
+    train_dirs = []
+    for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
+        if dataset_dir == valid_dir or dataset_dir == 'noisy-scrape':  # don't use noisy-scrape for now
+            continue
+        train_dirs.append(os.path.join(data_dir, dataset_dir))
+
+    valid_dirs = os.path.join(data_dir, valid_dir)
+
     #
     # image dimensions
     #
@@ -169,11 +181,11 @@ def main(train_dir, valid_dir, cache_base_model_features, train_top_only, base_m
                                   'batch_size': batch_size}
 
     train_generator = data_generator.flow_from_directory(
-        directory=train_dir,
+        directory=train_dirs,  # list of directories corresponding to each specific data set
         **flow_from_directory_params)
 
     valid_generator = data_generator.flow_from_directory(
-        directory=valid_dir,
+        directory=valid_dirs,
         **flow_from_directory_params)
 
     nb_classes = train_generator.nb_class
@@ -251,12 +263,13 @@ def main(train_dir, valid_dir, cache_base_model_features, train_top_only, base_m
         train_generator = base_model_output_generator('train')
         valid_generator = base_model_output_generator('valid')
 
-    class PlotModelPredictions(callbacks.Callback):
+    class CustomMetrics(callbacks.Callback):
         """
-        Plot a batch of validation images along w/ their true label and model's prediction after each epoch of training.
+        Plots a batch of validation images along w/ their true labels and model's prediction after each epoch
+        of training, as well as printing the confusion matrix.
 
         """
-        def on_epoch_end(self, epoch, logs={}):
+        def on_epoch_end(self, epoch, logs=None):
             image_batch, label_batch = valid_generator.next()
             label_batch = np_utils.categorical_probas_to_classes(label_batch)
 
@@ -270,20 +283,34 @@ def main(train_dir, valid_dir, cache_base_model_features, train_top_only, base_m
             plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
                                                  label_batch=label_batch_strings)
 
+            print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
+
     def get_callbacks():
         return [
             callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
             callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', save_best_only=True, verbose=1),
             callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1),
-            PlotModelPredictions()
+            CustomMetrics()
         ]
 
+    def get_class_weights(generator):
+        """
+        Gets class weights for a data set.
+
+        :param generator: The Keras data generator we want class weights for (i.e. train or valid).
+        :return: Dictionary where keys correspond to the class index and values corresponds to the class's weight.
+        """
+        nb_samples_per_class = dict(collections.Counter(generator.classes))  # see `image.DirectoryIterator.__init__()`
+        print('Number of samples per class: {}.'.format(nb_samples_per_class))
+
+        weights = {}
+        for cls, nb_samples in nb_samples_per_class.items():
+            weights[cls] = nb_samples / nb_samples_per_class.get(0)
+
+        return weights
+
     # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
-    classes = helpers.list_dir(train_dir, sub_dirs_only=True)
-    print(classes)
-    class_sizes = helpers.get_class_sizes(train_dir, valid_dir, classes)
-    print(class_sizes)
-    class_weights = helpers.get_class_weights(class_sizes, classes)
+    class_weights = get_class_weights(train_generator)
     print(class_weights)
 
     # train our model
