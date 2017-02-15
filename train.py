@@ -13,9 +13,11 @@ from keras import callbacks
 from keras import layers
 from keras import models
 from keras.preprocessing import image
+from keras.utils import np_utils
 import numpy as np
 import tensorflow as tf
 
+from dlutils import plot_image_batch_w_labels
 from wayadc.utils import helpers
 
 
@@ -24,7 +26,7 @@ from wayadc.utils import helpers
 #
 
 path = os.path.dirname(os.path.abspath(__file__))
-cache_dir = os.path.join(path, '../cache')  # cached base model outputs, model checkpoints, etc... saved in this dir
+cache_dir = os.path.join(path, 'cache')  # cached base model outputs, model checkpoints, etc... saved in this dir
 cached_base_model_outputs = os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords')
 model_checkpoint = os.path.join(cache_dir, 'model_checkpoint.h5')  # models are saved during training as they improve
 
@@ -249,11 +251,31 @@ def main(train_dir, valid_dir, cache_base_model_features, train_top_only, base_m
         train_generator = base_model_output_generator('train')
         valid_generator = base_model_output_generator('valid')
 
+    class PlotModelPredictions(callbacks.Callback):
+        """
+        Plot a batch of validation images along w/ their true label and model's prediction after each epoch of training.
+
+        """
+        def on_epoch_end(self, epoch, logs={}):
+            image_batch, label_batch = valid_generator.next()
+            label_batch = np_utils.categorical_probas_to_classes(label_batch)
+
+            predicted_labels = self.model.predict_on_batch(image_batch)
+            predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
+
+            label_batch_strings = []
+            for true_label, predicted_label in zip(label_batch, predicted_labels):
+                label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
+
+            plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
+                                                 label_batch=label_batch_strings)
+
     def get_callbacks():
         return [
             callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
             callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', save_best_only=True, verbose=1),
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1)
+            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1),
+            PlotModelPredictions()
         ]
 
     # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
