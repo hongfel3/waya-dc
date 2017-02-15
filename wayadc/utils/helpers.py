@@ -40,6 +40,13 @@ def download_aws_s3_object(aws_bucket, object_name, dest_dir, force=False):
         obj.download_file(object_file_path)
 
 
+def download_aws_s3_bucket(aws_bucket, dest_dir, force=False):
+    s3 = boto3.resource('s3')
+    bucket = s3.Bucket(aws_bucket)
+    for object_name in bucket.objects.all():
+        download_aws_s3_object(aws_bucket, object_name.key, dest_dir, force=force)
+
+
 def unzip_files_in_dir(dir_path):
     def unzip_file(file):
         if file.endswith('.zip'):
