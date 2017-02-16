@@ -126,9 +126,9 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
-    x = layers.Dense(256)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.advanced_activations.LeakyReLU()(x)
+    # x = layers.Dense(256)(x)
+    # x = layers.BatchNormalization()(x)
+    # x = layers.advanced_activations.LeakyReLU()(x)
 
     if model_input_tensor is None:
         model_input_tensor = top_model_input_tensor
@@ -202,10 +202,22 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     nb_train_samples = train_generator.nb_sample
     nb_valid_samples = valid_generator.nb_sample
 
-    # load the pre-trained base model and freeze it so its weights aren't messed up during training
+    # load the pre-trained base model
     base_model_input_tensor = layers.Input(shape=(img_height, img_width, img_channels))
     base_model = get_base_model(base_model_input_tensor, base_model_name)
-    base_model.trainable = False
+
+    if fine_tune:
+        layers_to_fine_tune = []
+    else:
+        layers_to_fine_tune = None
+
+    for layer in base_model.layers:
+        # `layers_to_fine_tune` will be passed to a Keras callback and layers will be popped off and made trainable
+        # as training progresses, and metrics (i.e. `valid_loss`) plateau/learning rate decreases
+        if len(layer.trainable_weights) > 0 and fine_tune:
+            layers_to_fine_tune.append(layer)  # Note: this means batch norm layers will be fine-tuned
+
+        layer.trainable = False  # freeze all layers in `base_model` so the pre-trained params aren't botched
 
     if cache_base_model_features:
         # feed all images (train and valid) into base model and cache its outputs
@@ -230,7 +242,6 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     print(model.summary())
 
-    # Note: this is very slow if not using a GPU and `train_top_only` should not be used in this case
     if train_top_only:
         def base_model_output_generator(dataset):
             """
@@ -298,8 +309,10 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
             callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', save_best_only=True, verbose=1),
             # make sure top model is trained before starting to fine tune the base model so large gradients don't botch
             # the base model's pre-trained weights
-            # the learning rate should be decreased substantially before fine tuning
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=2, verbose=1, fine_tune=fine_tune),
+            # the learning rate should be decreased substantially as layers base model layers are made trainable
+            # for this same reason
+            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=1, verbose=1,
+                                        layers_to_fine_tune=layers_to_fine_tune),
             callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
         ]
 
