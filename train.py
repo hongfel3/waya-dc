@@ -288,12 +288,13 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
             labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npy'))
 
             # since only training the top model, over-ride image generators with cached base model output generators
+            # NOTE: `cached_features` tells NumpyArrayIterator we are using cached base model outputs (changes behavior)
             train_generator = image.NumpyArrayIterator(base_model_outputs_train, labels_train, data_generator,
-                                                       batch_size=batch_size, shuffle=True)
+                                                       batch_size=batch_size, shuffle=True, cached_features=True)
             valid_generator = image.NumpyArrayIterator(base_model_outputs_valid, labels_valid,  data_generator,
-                                                       batch_size=batch_size, shuffle=True)
+                                                       batch_size=batch_size, shuffle=True, cached_features=True)
         else:
-            # FIXME: this is unusably slow and suspect in general
+            # TODO: this is unusably slow and suspect in general
             def base_model_output_generator(dataset):
                 """
                 Generator function that yields batches of base model output features and corresponding labels.
@@ -339,19 +340,21 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         Plots a batch of valid images along w/ their true labels and the model's predicted labels and saves to `cache/`
         and prints the confusion matrix for this batch of valid images.
         """
-        # plot
         image_batch, label_batch = next(valid_generator)
         label_batch = np_utils.categorical_probas_to_classes(label_batch)
 
         predicted_labels = model.predict_on_batch(image_batch)  # is calling model like this a problem?
         predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
 
-        label_batch_strings = []
-        for true_label, predicted_label in zip(label_batch, predicted_labels):
-            label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
+        # cached base model outputs should not be plotted
+        if not train_top_only:
+            # plot
+            label_batch_strings = []
+            for true_label, predicted_label in zip(label_batch, predicted_labels):
+                label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
 
-        plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
-                                             label_batch=label_batch_strings)
+            plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
+                                                 label_batch=label_batch_strings)
 
         # confusion matrix
         print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
@@ -370,6 +373,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         ]
 
     # train our model
+    # TODO: make sure there are no speed bottlenecks here when training on cached base model outputs
     model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1, callbacks=get_callbacks(),
                         validation_data=valid_generator, nb_val_samples=nb_valid_samples, class_weight=class_weights)
 
