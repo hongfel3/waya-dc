@@ -108,7 +108,7 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
         for i in range(nb_batches):
             print('Caching base model\'s outputs, batch: {} of {} in the {} dataset.'.format(i, nb_batches, dataset))
 
-            image_batch, label_batch = generator.next()
+            image_batch, label_batch = next(generator)
             base_model_outputs = base_model.predict(image_batch, batch_size=len(image_batch))
 
             if tf_record_format:
@@ -123,12 +123,11 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
                     writer.write(example.SerializeToString())
             else:
                 try:
-                    base_model_outputs_list.append(base_model_outputs)
-                    labels_list.append(label_batch)
-                    print(len(base_model_outputs_list), base_model_outputs_list[0].shape)
+                    base_model_outputs_list.extend(base_model_outputs)
+                    labels_list.extend(label_batch)
                 except NameError:
-                    base_model_outputs_list = base_model_outputs.tolist()
-                    labels_list = label_batch.tolist()
+                    base_model_outputs_list = list(base_model_outputs)
+                    labels_list = list(label_batch)
 
         if tf_record_format:
             writer.close()
@@ -295,8 +294,8 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                                                        batch_size=batch_size, shuffle=True)
             valid_generator = image.NumpyArrayIterator(base_model_outputs_valid, labels_valid,  data_generator,
                                                        batch_size=batch_size, shuffle=True)
-        # FIXME: this is unusably slow right now and suspect in general
         else:
+            # FIXME: this is unusably slow and suspect in general
             def base_model_output_generator(dataset):
                 """
                 Generator function that yields batches of base model output features and corresponding labels.
@@ -343,7 +342,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         and prints the confusion matrix for this batch of valid images.
         """
         # plot
-        image_batch, label_batch = valid_generator.next()
+        image_batch, label_batch = next(valid_generator)
         label_batch = np_utils.categorical_probas_to_classes(label_batch)
 
         predicted_labels = model.predict_on_batch(image_batch)  # is calling model like this a problem?
