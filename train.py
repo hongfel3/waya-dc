@@ -126,8 +126,8 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
                     base_model_outputs_list.append(base_model_outputs)
                     labels_list.append(label_batch)
                 except NameError:
-                    base_model_outputs_list = base_model_outputs
-                    labels_list = label_batch
+                    base_model_outputs_list = base_model_outputs.tolist()
+                    labels_list = label_batch.tolist()
 
         if tf_record_format:
             writer.close()
@@ -144,9 +144,9 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
-    # x = layers.Dense(256)(x)
-    # x = layers.BatchNormalization()(x)
-    # x = layers.advanced_activations.LeakyReLU()(x)
+    x = layers.Dense(256)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.advanced_activations.LeakyReLU()(x)
 
     if model_input_tensor is None:
         model_input_tensor = top_model_input_tensor
@@ -190,7 +190,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # training params
     #
 
-    batch_size = 128 if train_top_only else 32  # Some GPUs don't have enough memory for large batch sizes
+    batch_size = 32  # some GPUs don't have enough memory for large batch sizes
     nb_epoch = 50
 
     #
