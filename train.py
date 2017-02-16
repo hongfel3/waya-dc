@@ -74,9 +74,9 @@ def get_base_model(input_tensor, base_model_name):
     return base_model
 
 
-def cache_base_model_outputs(base_model, train_generator, valid_generator):
+def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_record_format=False):
     """
-    Saves base model output features for each input data sample to disc in TFRecord file format.
+    Saves base model output features for each input data sample to disc in TFRecord file format or .npz format.
 
     Each record w/in the TFRecord file is a serialized Example proto.
     See: https://www.tensorflow.org/how_tos/reading_data/ for more info.
@@ -90,16 +90,19 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
     :param base_model: The pre-trained base model.
     :param train_generator: Keras data generator for our train dataset.
     :param valid_generator: Keras data generator for our valid dataset.
+    :param tf_record_format: Flag indicating whether to cache as TFRecord or .npz (numpy array).
     """
     def _bytes_feature(value):
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
     for generator, dataset in zip([train_generator, valid_generator], ['train', 'valid']):
-        print('Saving base model\'s output features for the {} dataset to disc as a TFRecords file.'.format(dataset))
-        # writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
+        if tf_record_format:
+            log_str = 'TFRecords'
+            writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
+        else:
+            log_str = '.npz'
 
-        base_model_outputs_list = []
-        labels_list = []
+        print('Saving base model\'s output features for the {} dataset to disc as a {} file.'.format(dataset, log_str))
 
         nb_batches = math.ceil(generator.nb_sample / generator.batch_size)
         for i in range(nb_batches):
@@ -108,22 +111,29 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
             image_batch, label_batch = generator.next()
             base_model_outputs = base_model.predict(image_batch, batch_size=len(image_batch))
 
-            base_model_outputs_list.append(base_model_outputs)
-            labels_list.append(label_batch)
+            if tf_record_format:
+                for j, base_model_output in enumerate(base_model_outputs):
+                    base_model_output_raw = base_model_output.tostring()
+                    label_raw = label_batch[j].tostring()
 
-            """for j, base_model_output in enumerate(base_model_outputs):
-                base_model_output_raw = base_model_output.tostring()
-                label_raw = label_batch[j].tostring()
+                    example = tf.train.Example(features=tf.train.Features(feature={
+                        'base_model_output_features': _bytes_feature(base_model_output_raw),
+                        'label': _bytes_feature(label_raw)}))
 
-                example = tf.train.Example(features=tf.train.Features(feature={
-                    'base_model_output_features': _bytes_feature(base_model_output_raw),
-                    'label': _bytes_feature(label_raw)}))
+                    writer.write(example.SerializeToString())
+            else:
+                try:
+                    base_model_outputs_list.append(base_model_outputs)
+                    labels_list.append(label_batch)
+                except NameError:
+                    base_model_outputs_list = base_model_outputs
+                    labels_list = label_batch
 
-                writer.write(example.SerializeToString())"""
-
-        # writer.close()
-        np.save(os.path.join(cache_dir, 'base_model_outputs_{}.npz'.format(dataset)), np.asarray(base_model_outputs_list))
-        np.save(os.path.join(cache_dir, 'labels_{}.npz'.format(dataset)), np.asarray(labels_list))
+        if tf_record_format:
+            writer.close()
+        else:
+            np.save(os.path.join(cache_dir, 'base_model_outputs_{}.npz'.format(dataset)), np.asarray(base_model_outputs_list))
+            np.save(os.path.join(cache_dir, 'labels_{}.npz'.format(dataset)), np.asarray(labels_list))
 
 
 def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
@@ -156,7 +166,9 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
               help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
 @click.option('--fine_tune', default=False, type=bool,
               help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
-def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune):
+@click.option('--tf_record_format', default=False, type=bool,
+              help='True if base model outputs/labels should be cached/loaded in TFRecordFile format. Else npz format.')
+def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune, tf_record_format):
     # ...
     train_dirs = []
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
@@ -252,7 +264,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         # now during training we don't have to do forward and backward passes through the base model over and over again
         # this speeds up training dramatically and since we aren't training our base model it doesn't inhibit us much
         # Note: can't do this if we want data augmentation or want to fine-tune the base model
-        cache_base_model_outputs(base_model, train_generator, valid_generator)
+        cache_base_model_outputs(base_model, train_generator, valid_generator, tf_record_format=tf_record_format)
 
     if train_top_only:
         # the base model outputs are fixed (cached) and serve as the input data to our top model instead of images
@@ -271,56 +283,56 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     print(model.summary())
 
     if train_top_only:
-        # for now...
-        base_model_outputs_train = np.load(os.path.join(cache_dir, 'base_model_outputs_train.npz'))
-        labels_train = np.load(os.path.join(cache_dir, 'labels_train.npz'))
-        base_model_outputs_valid = np.load(os.path.join(cache_dir, 'base_model_outputs_valid.npz'))
-        labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npz'))
+        if not tf_record_format:
+            base_model_outputs_train = np.load(os.path.join(cache_dir, 'base_model_outputs_train.npz'))
+            labels_train = np.load(os.path.join(cache_dir, 'labels_train.npz'))
+            base_model_outputs_valid = np.load(os.path.join(cache_dir, 'base_model_outputs_valid.npz'))
+            labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npz'))
 
-        train_generator = image.NumpyArrayIterator(base_model_outputs_train, labels_train, data_generator,
-                                                   batch_size=batch_size, shuffle=True)
-        valid_generator = image.NumpyArrayIterator(base_model_outputs_valid, labels_valid,  data_generator,
-                                                   batch_size=batch_size, shuffle=True)
+            # since only training the top model, over-ride image generators with cached base model output generators
+            train_generator = image.NumpyArrayIterator(base_model_outputs_train, labels_train, data_generator,
+                                                       batch_size=batch_size, shuffle=True)
+            valid_generator = image.NumpyArrayIterator(base_model_outputs_valid, labels_valid,  data_generator,
+                                                       batch_size=batch_size, shuffle=True)
+        # FIXME: this is unusably slow right now and suspect in general
+        else:
+            def base_model_output_generator(dataset):
+                """
+                Generator function that yields batches of base model output features and corresponding labels.
 
-        # def base_model_output_generator(dataset):
-        """
-        Generator function that yields batches of base model output features and corresponding labels.
+                :param dataset: Whether to yield batches of data/labels from the 'train' or 'valid' TFRecordFile.
+                """
+                # infinite, shuffled iteration over data stored in the TFRecordFile
+                while True:
+                    base_model_output_features_batch = []
+                    label_batch = []
 
-        :param dataset: Whether to yield batches of data/labels from the 'train' or 'valid' TFRecordFile.
-        """
-        # infinite, shuffled iteration over data stored in the TFRecordFile
-        """while True:
-            base_model_output_features_batch = []
-            label_batch = []
+                    # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
+                    with tf.Session() as _:
+                        while len(base_model_output_features_batch) != batch_size:
+                            serialized_example = next(
+                                tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)))
 
-            # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
-            with tf.device('/cpu:0'):
-                with tf.Session() as _:
-                    while len(base_model_output_features_batch) != batch_size:
-                        serialized_example = next(
-                            tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)))
+                            # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
+                            features = tf.parse_single_example(
+                                serialized_example,
+                                features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
+                                          'label': tf.FixedLenFeature([], tf.string)}
+                            )
 
-                        # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
-                        features = tf.parse_single_example(
-                            serialized_example,
-                            features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
-                                      'label': tf.FixedLenFeature([], tf.string)}
-                        )
+                            b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
+                            b = tf.reshape(b, shape=base_model.output_shape[1:])
 
-                        b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
-                        b = tf.reshape(b, shape=base_model.output_shape[1:])
+                            l = tf.decode_raw(features.get('label'), out_type=tf.float32)
+                            l = tf.reshape(l, shape=(nb_classes, ))
 
-                        l = tf.decode_raw(features.get('label'), out_type=tf.float32)
-                        l = tf.reshape(l, shape=(nb_classes, ))
+                            base_model_output_features_batch.append(b.eval())
+                            label_batch.append(l.eval())
 
-                        base_model_output_features_batch.append(b.eval())
-                        label_batch.append(l.eval())
+                    yield np.asarray(base_model_output_features_batch), np.asarray(label_batch)
 
-            yield np.asarray(base_model_output_features_batch), np.asarray(label_batch)"""
-
-        # since we are only training the top model, over-ride image generators with cached base model output generators
-        # train_generator = base_model_output_generator('train')
-        # valid_generator = base_model_output_generator('valid')
+            train_generator = base_model_output_generator('train')
+            valid_generator = base_model_output_generator('valid')
 
     def on_epoch_end(epoch, logs={}):
         """
