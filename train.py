@@ -96,7 +96,10 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
 
     for generator, dataset in zip([train_generator, valid_generator], ['train', 'valid']):
         print('Saving base model\'s output features for the {} dataset to disc as a TFRecords file.'.format(dataset))
-        writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
+        # writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
+
+        base_model_outputs_list = []
+        labels_list = []
 
         nb_batches = math.ceil(generator.nb_sample / generator.batch_size)
         for i in range(nb_batches):
@@ -105,7 +108,10 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
             image_batch, label_batch = generator.next()
             base_model_outputs = base_model.predict(image_batch, batch_size=len(image_batch))
 
-            for j, base_model_output in enumerate(base_model_outputs):
+            base_model_outputs_list.append(base_model_outputs)
+            labels_list.append(label_batch)
+
+            """for j, base_model_output in enumerate(base_model_outputs):
                 base_model_output_raw = base_model_output.tostring()
                 label_raw = label_batch[j].tostring()
 
@@ -113,9 +119,11 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
                     'base_model_output_features': _bytes_feature(base_model_output_raw),
                     'label': _bytes_feature(label_raw)}))
 
-                writer.write(example.SerializeToString())
+                writer.write(example.SerializeToString())"""
 
-        writer.close()
+        # writer.close()
+        np.save(os.path.join(cache_dir, 'base_model_outputs_{}.npz'.format(dataset)), np.asarray(base_model_outputs_list))
+        np.save(os.path.join(cache_dir, 'labels_{}.npz'.format(dataset)), np.asarray(labels_list))
 
 
 def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
@@ -263,45 +271,56 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     print(model.summary())
 
     if train_top_only:
-        def base_model_output_generator(dataset):
-            """
-            Generator function that yields batches of base model output features and corresponding labels.
+        # for now...
+        base_model_outputs_train = np.load(os.path.join(cache_dir, 'base_model_outputs_train.npz'))
+        labels_train = np.load(os.path.join(cache_dir, 'labels_train.npz'))
+        base_model_outputs_valid = np.load(os.path.join(cache_dir, 'base_model_outputs_valid.npz'))
+        labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npz'))
 
-            :param dataset: Whether to yield batches of data/labels from the 'train' or 'valid' TFRecordFile.
-            """
-            # infinite, shuffled iteration over data stored in the TFRecordFile
-            while True:
-                base_model_output_features_batch = []
-                label_batch = []
+        train_generator = image.NumpyArrayIterator(base_model_outputs_train, labels_train, data_generator,
+                                                   batch_size=batch_size, shuffle=True)
+        valid_generator = image.NumpyArrayIterator(base_model_outputs_valid, labels_valid,  data_generator,
+                                                   batch_size=batch_size, shuffle=True)
 
-                # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
-                with tf.device('/cpu:0'):
-                    with tf.Session() as _:
-                        while len(base_model_output_features_batch) != batch_size:
-                            serialized_example = next(
-                                tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)))
+        # def base_model_output_generator(dataset):
+        """
+        Generator function that yields batches of base model output features and corresponding labels.
 
-                            # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
-                            features = tf.parse_single_example(
-                                serialized_example,
-                                features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
-                                          'label': tf.FixedLenFeature([], tf.string)}
-                            )
+        :param dataset: Whether to yield batches of data/labels from the 'train' or 'valid' TFRecordFile.
+        """
+        # infinite, shuffled iteration over data stored in the TFRecordFile
+        """while True:
+            base_model_output_features_batch = []
+            label_batch = []
 
-                            b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
-                            b = tf.reshape(b, shape=base_model.output_shape[1:])
+            # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
+            with tf.device('/cpu:0'):
+                with tf.Session() as _:
+                    while len(base_model_output_features_batch) != batch_size:
+                        serialized_example = next(
+                            tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)))
 
-                            l = tf.decode_raw(features.get('label'), out_type=tf.float32)
-                            l = tf.reshape(l, shape=(nb_classes, ))
+                        # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
+                        features = tf.parse_single_example(
+                            serialized_example,
+                            features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
+                                      'label': tf.FixedLenFeature([], tf.string)}
+                        )
 
-                            base_model_output_features_batch.append(b.eval())
-                            label_batch.append(l.eval())
+                        b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
+                        b = tf.reshape(b, shape=base_model.output_shape[1:])
 
-                yield np.asarray(base_model_output_features_batch), np.asarray(label_batch)
+                        l = tf.decode_raw(features.get('label'), out_type=tf.float32)
+                        l = tf.reshape(l, shape=(nb_classes, ))
+
+                        base_model_output_features_batch.append(b.eval())
+                        label_batch.append(l.eval())
+
+            yield np.asarray(base_model_output_features_batch), np.asarray(label_batch)"""
 
         # since we are only training the top model, over-ride image generators with cached base model output generators
-        train_generator = base_model_output_generator('train')
-        valid_generator = base_model_output_generator('valid')
+        # train_generator = base_model_output_generator('train')
+        # valid_generator = base_model_output_generator('valid')
 
     def on_epoch_end(epoch, logs={}):
         """
