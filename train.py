@@ -270,28 +270,32 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
             :param dataset: Whether to yield batches of data/labels from the 'train' or 'valid' TFRecordFile.
             """
             # infinite, shuffled iteration over data stored in the TFRecordFile
-            for serialized_example in tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)):
+            while True:
                 base_model_output_features_batch = []
                 label_batch = []
 
                 # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
-                with tf.Session() as _:
-                    while len(base_model_output_features_batch) != batch_size:
-                        # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
-                        features = tf.parse_single_example(
-                            serialized_example,
-                            features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
-                                      'label': tf.FixedLenFeature([], tf.string)}
-                        )
+                with tf.device('/cpu:0'):
+                    with tf.Session() as _:
+                        while len(base_model_output_features_batch) != batch_size:
+                            serialized_example = next(
+                                tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)))
 
-                        b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
-                        b = tf.reshape(b, shape=base_model.output_shape[1:])
+                            # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
+                            features = tf.parse_single_example(
+                                serialized_example,
+                                features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
+                                          'label': tf.FixedLenFeature([], tf.string)}
+                            )
 
-                        l = tf.decode_raw(features.get('label'), out_type=tf.float32)
-                        l = tf.reshape(l, shape=(nb_classes, ))
+                            b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
+                            b = tf.reshape(b, shape=base_model.output_shape[1:])
 
-                        base_model_output_features_batch.append(b.eval())
-                        label_batch.append(l.eval())
+                            l = tf.decode_raw(features.get('label'), out_type=tf.float32)
+                            l = tf.reshape(l, shape=(nb_classes, ))
+
+                            base_model_output_features_batch.append(b.eval())
+                            label_batch.append(l.eval())
 
                 yield np.asarray(base_model_output_features_batch), np.asarray(label_batch)
 
