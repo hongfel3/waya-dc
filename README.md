@@ -1,10 +1,40 @@
 # waya-dc
 Image classification using deep convolutional neural networks.
 
-## Getting started
-> $ sudo pip install -U -r requirements.txt  
-> $ python setup.py develop  
-> $ python train.py --help  
 
-## Running tests
-> $ pytest tests/  # Note: Unit tests currently access one of my private s3 buckets so they will fail for users w/ out auth.
+## Getting started
+
+#### Launching an AWS EC2 Instance
+
+Unless you have a GPU you will most likley need to train on a cloud compute instance such as AWS EC2 (in some cases you can get away with training smaller models on a CPU). Currently we are using the [Bitfusion Ubuntu 14 TensorFlow](https://aws.amazon.com/marketplace/pp/B01EYKBEQ0?ref=cns_srchrow) AMI, running on either a `pX.xlarge` or `gX.xlarge` instance (GPU enabled).  
+
+TODO: Create a community AMI or setup script that uses the most up-to-date required software packages (i.e. Cuda Toolkit, etc...) so we can use most the recent version of TensorFlow.  
+
+After launching an EC2 instance in the [AWS EC2 Console](https://console.aws.amazon.com/console/home), `ssh` into the instance.  
+
+```bash
+$ ssh -i <AWS_KEY_INSTANCE_WAS_LAUNCHED_WITH>.pem ubuntu@<INSTANCE_PUBLIC_IP>
+```
+
+#### Installation
+
+```bash
+$ git clone https://github.com/wayaai/waya-dc.git
+$ cd waya-dc/
+$ sudo pip3 install -U -r requirements.txt
+$ sudo python3 setup.py develop
+# Using default TensorFlow version installed on AMI, if on your PC run: $ sudo pip3 install -U tensorflow
+```
+
+#### Getting data sets
+
+```bash
+$ python3 wayadc/utils/get_datasets.py
+```
+
+#### Training model
+
+```bash
+$ python3 train.py --help  # To see available options
+$ python3 train.py
+```
