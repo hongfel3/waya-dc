@@ -170,7 +170,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # training params
     #
 
-    batch_size = 128
+    batch_size = 128 if train_top_only else 32  # Some GPUs don't have enough memory for large batch sizes
     nb_epoch = 50
 
     #
@@ -201,6 +201,26 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     nb_train_samples = train_generator.nb_sample
     nb_valid_samples = valid_generator.nb_sample
+
+    def get_class_weights(generator):
+        """
+        Gets class weights for a data generator (i.e. train or valid).
+
+        :param generator: The Keras data generator.
+        :return: Dictionary where keys correspond to the class index and values corresponds to the class's weight.
+        """
+        nb_samples_per_class = dict(collections.Counter(generator.classes))  # see `image.DirectoryIterator.__init__()`
+        print('Number of samples per class: {}.'.format(nb_samples_per_class))
+
+        weights = {}
+        for cls, nb_samples in nb_samples_per_class.items():
+            weights[cls] = nb_samples_per_class.get(0) / nb_samples
+
+        return weights
+
+    # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
+    class_weights = get_class_weights(train_generator)
+    print(class_weights)
 
     # load the pre-trained base model
     base_model_input_tensor = layers.Input(shape=(img_height, img_width, img_channels))
@@ -315,26 +335,6 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                                         layers_to_fine_tune=layers_to_fine_tune),
             callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
         ]
-
-    def get_class_weights(generator):
-        """
-        Gets class weights for a data generator (i.e. train or valid).
-
-        :param generator: The Keras data generator.
-        :return: Dictionary where keys correspond to the class index and values corresponds to the class's weight.
-        """
-        nb_samples_per_class = dict(collections.Counter(generator.classes))  # see `image.DirectoryIterator.__init__()`
-        print('Number of samples per class: {}.'.format(nb_samples_per_class))
-
-        weights = {}
-        for cls, nb_samples in nb_samples_per_class.items():
-            weights[cls] = nb_samples_per_class.get(0) / nb_samples
-
-        return weights
-
-    # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
-    class_weights = get_class_weights(train_generator)
-    print(class_weights)
 
     # train our model
     model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1, callbacks=get_callbacks(),

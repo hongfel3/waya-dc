@@ -5,4 +5,3 @@ git+https://github.com/wayaai/keras.git@dev
 numpy
 pytest
 sklearn
-tensorflow
