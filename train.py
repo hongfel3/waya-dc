@@ -76,7 +76,7 @@ def get_base_model(input_tensor, base_model_name):
 
 def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_record_format=False):
     """
-    Saves base model output features for each input data sample to disc in TFRecord file format or .npz format.
+    Saves base model output features for each input data sample to disc in TFRecord file format or .npy format.
 
     Each record w/in the TFRecord file is a serialized Example proto.
     See: https://www.tensorflow.org/how_tos/reading_data/ for more info.
@@ -90,7 +90,7 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
     :param base_model: The pre-trained base model.
     :param train_generator: Keras data generator for our train dataset.
     :param valid_generator: Keras data generator for our valid dataset.
-    :param tf_record_format: Flag indicating whether to cache as TFRecord or .npz (numpy array).
+    :param tf_record_format: Flag indicating whether to cache as TFRecord or .npy (numpy array).
     """
     def _bytes_feature(value):
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
@@ -100,7 +100,7 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
             log_str = 'TFRecords'
             writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
         else:
-            log_str = '.npz'
+            log_str = '.npy'
 
         print('Saving base model\'s output features for the {} dataset to disc as a {} file.'.format(dataset, log_str))
 
@@ -125,6 +125,7 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
                 try:
                     base_model_outputs_list.append(base_model_outputs)
                     labels_list.append(label_batch)
+                    print(len(base_model_outputs_list), base_model_outputs_list[0].shape)
                 except NameError:
                     base_model_outputs_list = base_model_outputs.tolist()
                     labels_list = label_batch.tolist()
@@ -132,8 +133,8 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
         if tf_record_format:
             writer.close()
         else:
-            np.save(os.path.join(cache_dir, 'base_model_outputs_{}.npz'.format(dataset)), np.asarray(base_model_outputs_list))
-            np.save(os.path.join(cache_dir, 'labels_{}.npz'.format(dataset)), np.asarray(labels_list))
+            np.save(os.path.join(cache_dir, 'base_model_outputs_{}'.format(dataset)), np.asarray(base_model_outputs_list))
+            np.save(os.path.join(cache_dir, 'labels_{}'.format(dataset)), np.asarray(labels_list))
 
 
 def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
@@ -167,7 +168,7 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
 @click.option('--fine_tune', default=False, type=bool,
               help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
 @click.option('--tf_record_format', default=False, type=bool,
-              help='True if base model outputs/labels should be cached/loaded in TFRecordFile format. Else npz format.')
+              help='True if base model outputs/labels should be cached/loaded in TFRecordFile format. Else npy format.')
 def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune, tf_record_format):
     # ...
     train_dirs = []
@@ -284,10 +285,10 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     if train_top_only:
         if not tf_record_format:
-            base_model_outputs_train = np.load(os.path.join(cache_dir, 'base_model_outputs_train.npz'))
-            labels_train = np.load(os.path.join(cache_dir, 'labels_train.npz'))
-            base_model_outputs_valid = np.load(os.path.join(cache_dir, 'base_model_outputs_valid.npz'))
-            labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npz'))
+            base_model_outputs_train = np.load(os.path.join(cache_dir, 'base_model_outputs_train.npy'))
+            labels_train = np.load(os.path.join(cache_dir, 'labels_train.npy'))
+            base_model_outputs_valid = np.load(os.path.join(cache_dir, 'base_model_outputs_valid.npy'))
+            labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npy'))
 
             # since only training the top model, over-ride image generators with cached base model output generators
             train_generator = image.NumpyArrayIterator(base_model_outputs_train, labels_train, data_generator,
