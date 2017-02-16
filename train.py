@@ -101,6 +101,8 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
             writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
         else:
             log_str = '.npy'
+            base_model_outputs_list = []
+            labels_list = []
 
         print('Saving base model\'s output features for the {} dataset to disc as a {} file.'.format(dataset, log_str))
 
@@ -122,12 +124,8 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
 
                     writer.write(example.SerializeToString())
             else:
-                try:
-                    base_model_outputs_list.extend(base_model_outputs)
-                    labels_list.extend(label_batch)
-                except NameError:
-                    base_model_outputs_list = list(base_model_outputs)
-                    labels_list = list(label_batch)
+                base_model_outputs_list.extend(base_model_outputs)
+                labels_list.extend(label_batch)
 
         if tf_record_format:
             writer.close()
