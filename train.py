@@ -126,6 +126,10 @@ def get_model(model_input_tensor, nb_classes, base_model_name):
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
+    x = layers.Dense(256)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.advanced_activations.LeakyReLU()(x)
+
     x = layers.Dense(nb_classes, activation='softmax')(x)
     return models.Model(input=model_input_tensor, output=x)
 
@@ -137,7 +141,7 @@ def get_model(model_input_tensor, nb_classes, base_model_name):
               help='Cache base model outputs for train and valid data sets to greatly reduce training times.')
 @click.option('--train_top_only', default=False, type=bool,
               help='Train the top model (classifier network) on cached base model outputs.')
-@click.option('--base_model_name', default='xception', type=str,
+@click.option('--base_model_name', default='resnet50', type=str,
               help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
 @click.option('--fine_tune', default=False, type=bool,
               help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
@@ -145,7 +149,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # ...
     train_dirs = []
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
-        if dataset_dir == valid_dir or dataset_dir == 'noisy-scrape':  # don't use noisy-scrape for now
+        if dataset_dir == valid_dir:  # or dataset_dir == 'noisy-scrape':  # don't use noisy-scrape for now
             continue
         train_dirs.append(os.path.join(data_dir, dataset_dir))
 
@@ -155,15 +159,15 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # image dimensions
     #
 
-    img_width = 224
-    img_height = 224
+    img_width = 299
+    img_height = 299
     img_channels = 3
 
     #
     # training params
     #
 
-    batch_size = 32
+    batch_size = 128
     nb_epoch = 50
 
     #
@@ -295,9 +299,9 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     def get_class_weights(generator):
         """
-        Gets class weights for a data set.
+        Gets class weights for a data generator (i.e. train or valid).
 
-        :param generator: The Keras data generator we want class weights for (i.e. train or valid).
+        :param generator: The Keras data generator.
         :return: Dictionary where keys correspond to the class index and values corresponds to the class's weight.
         """
         nb_samples_per_class = dict(collections.Counter(generator.classes))  # see `image.DirectoryIterator.__init__()`
@@ -305,7 +309,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
         weights = {}
         for cls, nb_samples in nb_samples_per_class.items():
-            weights[cls] = nb_samples / nb_samples_per_class.get(0)
+            weights[cls] = nb_samples_per_class.get(0) / nb_samples
 
         return weights
 
