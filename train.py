@@ -118,17 +118,20 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
         writer.close()
 
 
-def get_model(model_input_tensor, nb_classes, base_model_name):
+def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
     if base_model_name == 'resnet50':
-        x = layers.Flatten()(model_input_tensor)
+        x = layers.Flatten()(top_model_input_tensor)
     elif base_model_name == 'xception':
-        x = layers.GlobalAveragePooling2D()(model_input_tensor)
+        x = layers.GlobalAveragePooling2D()(top_model_input_tensor)
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
     x = layers.Dense(256)(x)
     x = layers.BatchNormalization()(x)
     x = layers.advanced_activations.LeakyReLU()(x)
+
+    if model_input_tensor is None:
+        model_input_tensor = top_model_input_tensor
 
     x = layers.Dense(nb_classes, activation='softmax')(x)
     return models.Model(input=model_input_tensor, output=x)
@@ -213,21 +216,19 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     if train_top_only:
         # the base model outputs are fixed (cached) and serve as the input data to our top model instead of images
-        model_input_tensor = layers.Input(shape=base_model.output_shape[1:])
+        model_input_tensor = None
+        top_model_input_tensor = layers.Input(shape=base_model.output_shape[1:])
+        assert not fine_tune, 'Fine-tuning can not be done if we are only training the top model.'
     else:
         # base model and top model will be combined into one model. the inputs to this model are images
         model_input_tensor = base_model_input_tensor
-
-    if fine_tune:
-        # make sure top model is trained before starting to fine tune the base model so large gradients don't botch the
-        # base models pre-trained weights
-        # the learning rate should also be decreased before fine tuning
-        # TODO: make a keras contribution allowing making base model layers trainable upon loss plateaus
-        assert False, 'Fine tuning not implemented yet.'
+        top_model_input_tensor = base_model.output
 
     # get our model (either combined or only the classifier ntwk based on `model_input_tensor`) and compile for training
-    model = get_model(model_input_tensor, nb_classes, base_model_name)
+    model = get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=model_input_tensor)
     model.compile('adam', 'categorical_crossentropy', metrics=['accuracy'])
+
+    print(model.summary())
 
     # Note: this is very slow if not using a GPU and `train_top_only` should not be used in this case
     if train_top_only:
@@ -267,34 +268,39 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         train_generator = base_model_output_generator('train')
         valid_generator = base_model_output_generator('valid')
 
-    class CustomMetrics(callbacks.Callback):
+    def on_epoch_end(epoch, logs={}):
         """
-        Plots a batch of validation images along w/ their true labels and model's prediction after each epoch
-        of training, as well as printing the confusion matrix.
+        Anonymous function called after each epoch of training, registered with the `LambdaCallback`.
 
+        Plots a batch of valid images along w/ their true labels and the model's predicted labels and saves to `cache/`
+        and prints the confusion matrix for this batch of valid images.
         """
-        def on_epoch_end(self, epoch, logs=None):
-            image_batch, label_batch = valid_generator.next()
-            label_batch = np_utils.categorical_probas_to_classes(label_batch)
+        # plot
+        image_batch, label_batch = valid_generator.next()
+        label_batch = np_utils.categorical_probas_to_classes(label_batch)
 
-            predicted_labels = self.model.predict_on_batch(image_batch)
-            predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
+        predicted_labels = model.predict_on_batch(image_batch)  # is calling model like this a problem?
+        predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
 
-            label_batch_strings = []
-            for true_label, predicted_label in zip(label_batch, predicted_labels):
-                label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
+        label_batch_strings = []
+        for true_label, predicted_label in zip(label_batch, predicted_labels):
+            label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
 
-            plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
-                                                 label_batch=label_batch_strings)
+        plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
+                                             label_batch=label_batch_strings)
 
-            print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
+        # confusion matrix
+        print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
 
     def get_callbacks():
         return [
             callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
             callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', save_best_only=True, verbose=1),
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1),
-            CustomMetrics()
+            # make sure top model is trained before starting to fine tune the base model so large gradients don't botch
+            # the base model's pre-trained weights
+            # the learning rate should be decreased substantially before fine tuning
+            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=2, verbose=1, fine_tune=fine_tune),
+            callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
         ]
 
     def get_class_weights(generator):
