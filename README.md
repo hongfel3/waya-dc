@@ -8,8 +8,6 @@ Image classification using deep convolutional neural networks.
 
 Unless you have a GPU you will most likley need to train on a cloud compute instance such as AWS EC2 (in some cases you can get away with training smaller models on a CPU). Currently we are using the [Bitfusion Ubuntu 14 TensorFlow](https://aws.amazon.com/marketplace/pp/B01EYKBEQ0?ref=cns_srchrow) AMI, running on either a `pX.xlarge` or `gX.xlarge` instance (GPU enabled).  
 
-TODO: Create a community AMI or setup script that uses the most up-to-date required software packages (i.e. Cuda Toolkit, etc...) so we can use most the recent version of TensorFlow.  
-
 After launching an EC2 instance in the [AWS EC2 Console](https://console.aws.amazon.com/console/home), `ssh` into the instance.  
 
 ```bash
