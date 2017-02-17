@@ -41,7 +41,7 @@ $ python3 train.py
 
 #### Notes
 
-* Make sure you use Waya.ai's [Keras fork](https://github.com/wayaai/keras) (see `requirements.txt`)
+* Make sure you use Waya.ai's [Keras fork](https://github.com/wayaai/keras) (see [requirements.txt](https://github.com/wayaai/waya-dc/blob/master/requirements.txt)).
 * [Getting started w/ tmux on AWS](https://medium.com/towards-data-science/deep-learning-aws-ec2-tmux-3b96777016e2#.uogw5eavz) will help you when you really start training models.
 * You may prefer [Running a Jupyter Notebook](http://jupyter-notebook-beginner-guide.readthedocs.io/en/latest/execute.html) on the AWS instance.
 
