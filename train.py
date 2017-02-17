@@ -2,6 +2,11 @@
 Image classification using deep convolutional neural networks.
 
 Note: Only Python 3 support currently.
+
+Note: The most complicated code in this script is the caching/loading of base model outputs to/from TFRecordFiles.
+      It is not necessary to understand this code (and it is too slow right now to be useful anyways).
+      It seems to be the 'TensorFlow' way to properly store/load large data sets though so I've left the code in and
+      fixing it is an open issue. For now the fast & recommended way to do this is the default option (numpy npy files).
 """
 
 import collections
@@ -18,7 +23,7 @@ from keras.preprocessing import image
 from keras.utils import np_utils
 import numpy as np
 from sklearn import metrics
-import tensorflow as tf
+import tensorflow as tf  # TensorFlow is not in `requirements.txt` - must be installed by user based on OS/hardware
 
 from dlutils import plot_image_batch_w_labels
 from wayadc.utils import helpers
@@ -29,8 +34,8 @@ from wayadc.utils import helpers
 #
 
 path = os.path.dirname(os.path.abspath(__file__))
-cache_dir = os.path.join(path, 'cache')  # cached base model outputs, model checkpoints, etc... saved in this dir
-data_dir = os.path.join(path, 'data')  # data sets are saved in this dir
+cache_dir = os.path.join(path, 'cache')  # cached base model outputs, model checkpoints, etc... are saved in this dir
+data_dir = os.path.join(path, 'data')  # data sets are saved in this dir by `$ python3 wayadc/utils/get_datasets.py`
 
 
 def get_base_model(input_tensor, base_model_name):
@@ -225,9 +230,6 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     assert train_generator.nb_class == valid_generator.nb_class, \
         'Train and valid data sets must have the same number of classes.'
 
-    nb_train_samples = train_generator.nb_sample
-    nb_valid_samples = valid_generator.nb_sample
-
     def get_class_weights(generator):
         """
         Gets class weights for a data generator (i.e. train or valid).
@@ -369,15 +371,16 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                 plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
                                                      label_batch=label_batch_strings)
             except TypeError:
-                # bug in `deep-learning-utils`: TypeError: 'AxesSubplot' object does not support indexing
+                # TODO: fix bug in `deep-learning-utils`: TypeError: 'AxesSubplot' object does not support indexing
                 pass
 
-            # remove noisy data set(s) (this is a little hacky and requires knowledge of inner-workings of Keras)
+            # remove noisy data set(s) (this is a little hacky and requires knowledge of the inner-workings of Keras)
             if epoch == 12:
                 # now that the lr is low, let's remove noisy data set(s) and touch up our model on very clean data
                 train_dirs.remove(os.path.join(data_dir, 'noisy-scrape'))
+                print('Removing noisy data sets. Model will be trained on: {}.'.format(train_dirs))
 
-                # reset train_generator
+                # reset `train_generator` to generate images from new `train_dirs`
                 train_generator = data_generator.flow_from_directory(
                     directory=train_dirs,
                     **flow_from_directory_params)
@@ -393,22 +396,30 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
 
     def get_callbacks():
+        """
+        Helper function to get callbacks to be passed to `model.fit_generator`.
+
+        :return: A list of Keras callbacks to be executed while training our model.
+        """
         return [
             callbacks.EarlyStopping(monitor='val_loss', patience=24, verbose=1),
             callbacks.ModelCheckpoint(os.path.join(cache_dir, 'model_checkpoint.h5'), monitor='val_acc',
                                       save_best_only=True, verbose=1),
-            # make sure top model is trained before starting to fine tune the base model so large gradients don't botch
-            # the base model's pre-trained weights
-            # the learning rate should be decreased substantially as base model layers are made trainable
+            # make sure the top model is trained before starting to fine tune the base model so large gradients don't
+            # botch the base model's pre-trained weights
+            # the learning rate should be decreased substantially as the base model's layers are made trainable
             # for this same reason
+            # reduce our model's lr and un-freeze layers in our base model as training progresses & `val_loss` plateaus
             callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1,
                                         layers_to_fine_tune=layers_to_fine_tune),
             callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
+            # TODO: TensorBoard callback
         ]
 
     # train our model
-    model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1, callbacks=get_callbacks(),
-                        validation_data=valid_generator, nb_val_samples=nb_valid_samples, class_weight=class_weights)
+    model.fit_generator(train_generator, train_generator.nb_sample, nb_epoch=nb_epoch, verbose=1,
+                        callbacks=get_callbacks(), validation_data=valid_generator,
+                        nb_val_samples=valid_generator.nb_sample, class_weight=class_weights)
 
 
 if __name__ == '__main__':
