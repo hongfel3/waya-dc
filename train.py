@@ -363,8 +363,12 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
             for true_label, predicted_label in zip(label_batch, predicted_labels):
                 label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
 
-            plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
-                                                 label_batch=label_batch_strings)
+            try:
+                plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
+                                                     label_batch=label_batch_strings)
+            except TypeError:
+                # bug in `deep-learning-utils`: TypeError: 'AxesSubplot' object does not support indexing
+                pass
 
         # confusion matrix
         print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
