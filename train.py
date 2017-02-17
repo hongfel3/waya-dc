@@ -13,6 +13,7 @@ from keras import applications
 from keras import callbacks
 from keras import layers
 from keras import models
+from keras.engine import training
 from keras.preprocessing import image
 from keras.utils import np_utils
 import numpy as np
@@ -141,9 +142,10 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
-    x = layers.Dense(256)(x)
+    x = layers.Dense(1024)(x)
     x = layers.BatchNormalization()(x)
     x = layers.advanced_activations.LeakyReLU()(x)
+    x = layers.Dropout(0.25)(x)
 
     if model_input_tensor is None:
         model_input_tensor = top_model_input_tensor
@@ -356,7 +358,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         predicted_labels = model.predict_on_batch(image_batch)
         predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
 
-        # cached base model outputs can't be plotted
+        # cached base model outputs can't be plotted and noisy data set(s) can't be removed
         if not train_top_only:
             # plot
             label_batch_strings = []
@@ -370,12 +372,29 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                 # bug in `deep-learning-utils`: TypeError: 'AxesSubplot' object does not support indexing
                 pass
 
+            # remove noisy data set(s) (this is a little hacky and requires knowledge of inner-workings of Keras)
+            if epoch == 12:
+                # now that the lr is low, let's remove noisy data set(s) and touch up our model on very clean data
+                train_dirs.remove(os.path.join(data_dir, 'noisy-scrape'))
+
+                # reset train_generator
+                train_generator = data_generator.flow_from_directory(
+                    directory=train_dirs,
+                    **flow_from_directory_params)
+
+                # stop the old `GeneratorEnqueuer`
+                model.enqueuer.stop()
+
+                # create and start a new `GeneratorEnqueuer` that uses our new `train_generator`
+                model.enqueuer = training.GeneratorEnqueuer(train_generator)
+                model.enqueuer.start()
+
         # confusion matrix
         print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
 
     def get_callbacks():
         return [
-            callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
+            callbacks.EarlyStopping(monitor='val_loss', patience=24, verbose=1),
             callbacks.ModelCheckpoint(os.path.join(cache_dir, 'model_checkpoint.h5'), monitor='val_acc',
                                       save_best_only=True, verbose=1),
             # make sure top model is trained before starting to fine tune the base model so large gradients don't botch
