@@ -42,4 +42,8 @@ $ python3 train.py
 #### Notes
 
 * Make sure you use Waya.ai's [Keras fork](https://github.com/wayaai/keras) (see `requirements.txt`)
+* [Getting started w/ tmux on AWS](https://medium.com/towards-data-science/deep-learning-aws-ec2-tmux-3b96777016e2#.uogw5eavz) will help you when you really start training models.
+* You may prefer [Running a Jupyter Notebook](http://jupyter-notebook-beginner-guide.readthedocs.io/en/latest/execute.html) on the AWS instance.
 
+#### About Waya.ai
+[Waya.ai](http://waya.ai) is a company whose vision is a world where medical conditions are addressed early on, in their infancy. This approach will shift the health-care industry from a constant fire-fight against symptoms to a preventative approach where root causes are addressed and fixed. Our first step to realize this vision is easy, accurate and available diagnosis. Our current focus is concussion diagnosis, recovery tracking & brain health monitoring. Please get in contact with me if this resonates with you!
