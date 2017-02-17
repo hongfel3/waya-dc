@@ -1,6 +1,8 @@
 """
 TODO: Fix these tests for users who don't have access to my private s3 buckets.
+TODO: Use pytest framework more effectively.
 
+To run: $ pytest tests/
 """
 
 import os
@@ -68,64 +70,6 @@ def test_list_dir():
         assert False, e
 
 
-def test_copy_image():
-    src_dir = os.path.join(os.path.join(TEST_S3_DIR, 'manually_collected'), 'atypical')
-
-    images = helpers.list_dir(src_dir, images_only=True)
-
-    # Test 1
-    helpers.copy_image(images[0], src_dir, TEST_DATA_DIR)
-    assert os.path.isfile(os.path.join(TEST_DATA_DIR, images[0]))
-    assert os.path.isfile(os.path.join(src_dir, images[0]))
-    assert len(helpers.list_dir(TEST_DATA_DIR, images_only=True)) == 1
-
-    # Test 2: Image to copy already exists in dest_dir.
-    helpers.copy_image(images[0], src_dir, TEST_DATA_DIR)
-    assert os.path.isfile(os.path.join(TEST_DATA_DIR, images[0]))
-    assert len(helpers.list_dir(TEST_DATA_DIR, images_only=True)) == 1
-
-
-def test_get_file_path_with_extension():
-    dir = os.path.join(os.path.join(TEST_S3_DIR, 'manually_collected'), 'atypical')
-
-    images = helpers.list_dir(dir, images_only=True)
-    test_image = images[0]
-    test_image_no_ext = test_image.split('.')[0]
-
-    assert helpers.get_file_path_with_extension(os.path.join(dir, test_image_no_ext)) == os.path.join(dir, test_image)
-
-
-def test_get_class_weights():
-    classes = ['c1', 'c2']
-
-    # Test 1.
-    class_sizes = {'train': {classes[0]: 100, classes[1]: 100}, 'valid': {}}
-    class_weights = helpers.get_class_weights(class_sizes, classes)
-
-    assert class_weights == {0: 1.0, 1: 1.0}
-
-    # Test 2.
-    class_sizes = {'train': {classes[0]: 200, classes[1]: 50}, 'valid': {}}
-    class_weights = helpers.get_class_weights(class_sizes, classes)
-
-    assert class_weights == {0: 1.0, 1: 4.0}
-
-    # Test 3.
-    class_sizes = {'train': {classes[0]: 50, classes[1]: 200}, 'valid': {}}
-    class_weights = helpers.get_class_weights(class_sizes, classes)
-
-    assert class_weights == {0: 1.0, 1: 0.25}
-
-    # Test 4.
-    classes.append('c3')
-    class_sizes = {'train': {classes[0]: 200, classes[1]: 200, classes[2]: 200},
-                   'valid': {classes[0]: 12, classes[1]: 34}}
-    class_weights = helpers.get_class_weights(class_sizes, classes)
-
-    assert class_weights == {0: 1.0, 1: 1.0, 2: 1.0}
-
-
-# TODO: Figure out pytest framework...
 def test_cleanup():
     shutil.rmtree(TEST_DATA_DIR)
     assert not os.path.isdir(TEST_DATA_DIR)

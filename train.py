@@ -30,8 +30,6 @@ from wayadc.utils import helpers
 path = os.path.dirname(os.path.abspath(__file__))
 cache_dir = os.path.join(path, 'cache')  # cached base model outputs, model checkpoints, etc... saved in this dir
 data_dir = os.path.join(path, 'data')  # data sets are saved in this dir
-cached_base_model_outputs = os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords')
-model_checkpoint = os.path.join(cache_dir, 'model_checkpoint.h5')  # models are saved during training as they improve
 
 
 def get_base_model(input_tensor, base_model_name):
@@ -98,7 +96,8 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
     for generator, dataset in zip([train_generator, valid_generator], ['train', 'valid']):
         if tf_record_format:
             log_str = 'TFRecords'
-            writer = tf.python_io.TFRecordWriter(cached_base_model_outputs.format(dataset))
+            writer = tf.python_io.TFRecordWriter(os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords'.
+                                                              format(dataset)))
         else:
             log_str = '.npy'
             base_model_outputs_list = []
@@ -167,7 +166,7 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
 @click.option('--tf_record_format', default=False, type=bool,
               help='True if base model outputs/labels should be cached/loaded in TFRecordFile format. Else npy format.')
 def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune, tf_record_format):
-    # ...
+    # get list of directories for train and valid data sets to be passed to Keras generator
     train_dirs = []
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
         if dataset_dir == valid_dir:  # or dataset_dir == 'noisy-scrape':  # don't use noisy-scrape for now
@@ -176,8 +175,13 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     valid_dirs = os.path.join(data_dir, valid_dir)
 
+    # make sure no valid data sets are also train
+    for valid_dir in valid_dirs:
+        assert valid_dir not in train_dirs
+
     #
     # image dimensions
+    # Note: base models used for pre-training usually have requirements/preferences for input dimensions
     #
 
     img_width = 299
@@ -197,6 +201,8 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     # there are lots of optional params for data augmentation that can be used here
     data_generator = image.ImageDataGenerator(
+        # NOTE: if we are using `data_generator` for a cached base model output generator we don't want
+        # `preprocessing_function` but our Keras branch ignores this in this case so it isn't a bug
         preprocessing_function=applications.xception.preprocess_input,  # normalize data so entries are in range [-1, 1]
         dim_ordering='tf')
 
@@ -244,19 +250,6 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     base_model_input_tensor = layers.Input(shape=(img_height, img_width, img_channels))
     base_model = get_base_model(base_model_input_tensor, base_model_name)
 
-    if fine_tune:
-        layers_to_fine_tune = []
-    else:
-        layers_to_fine_tune = None
-
-    for layer in base_model.layers:
-        # `layers_to_fine_tune` will be passed to a Keras callback and layers will be popped off and made trainable
-        # as training progresses, and metrics (i.e. `valid_loss`) plateau/learning rate decreases
-        if len(layer.trainable_weights) > 0 and fine_tune:
-            layers_to_fine_tune.append(layer)  # Note: this means batch norm layers will be fine-tuned
-
-        layer.trainable = False  # freeze all layers in `base_model` so the pre-trained params aren't botched
-
     if cache_base_model_features:
         # feed all images (train and valid) into base model and cache its outputs
         # now during training we don't have to do forward and backward passes through the base model over and over again
@@ -274,10 +267,27 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         model_input_tensor = base_model_input_tensor
         top_model_input_tensor = base_model.output
 
-    # get our model (either combined or only the classifier ntwk based on `model_input_tensor`) and compile for training
+    # get our model (either combined or only the classifier ntwk based on `model_input_tensor`)
     model = get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=model_input_tensor)
+
+    if fine_tune:
+        layers_to_fine_tune = []
+    else:
+        layers_to_fine_tune = None
+
+    # freeze all layers in `base_model` so the pre-trained params aren't botched and prepare for fine tuning (if True)
+    for layer in base_model.layers:
+        # `layers_to_fine_tune` will be passed to a Keras callback and layers will be popped off and made trainable
+        # as training progresses, and metrics (i.e. `valid_loss`) plateau/learning rate decreases
+        if len(layer.trainable_weights) > 0 and fine_tune:
+            layers_to_fine_tune.append(layer)  # Note: this means batch norm layers will be fine-tuned
+
+        layer.trainable = False
+
+    # compile our model
     model.compile('adam', 'categorical_crossentropy', metrics=['accuracy'])
 
+    # print info for each layer in model, this helps prevent bugs
     print(model.summary())
 
     if train_top_only:
@@ -309,8 +319,8 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                     # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
                     with tf.Session() as _:
                         while len(base_model_output_features_batch) != batch_size:
-                            serialized_example = next(
-                                tf.python_io.tf_record_iterator(cached_base_model_outputs.format(dataset)))
+                            serialized_example = next(tf.python_io.tf_record_iterator(
+                                os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords'.format(dataset))))
 
                             # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
                             features = tf.parse_single_example(
@@ -343,10 +353,10 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         image_batch, label_batch = next(valid_generator)
         label_batch = np_utils.categorical_probas_to_classes(label_batch)
 
-        predicted_labels = model.predict_on_batch(image_batch)  # is calling model like this a problem?
+        predicted_labels = model.predict_on_batch(image_batch)
         predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
 
-        # cached base model outputs should not be plotted
+        # cached base model outputs can't be plotted
         if not train_top_only:
             # plot
             label_batch_strings = []
@@ -362,18 +372,18 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     def get_callbacks():
         return [
             callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
-            callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', save_best_only=True, verbose=1),
+            callbacks.ModelCheckpoint(os.path.join(cache_dir, 'model_checkpoint.h5'), monitor='val_acc',
+                                      save_best_only=True, verbose=1),
             # make sure top model is trained before starting to fine tune the base model so large gradients don't botch
             # the base model's pre-trained weights
-            # the learning rate should be decreased substantially as layers base model layers are made trainable
+            # the learning rate should be decreased substantially as base model layers are made trainable
             # for this same reason
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=1, verbose=1,
+            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1,
                                         layers_to_fine_tune=layers_to_fine_tune),
             callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
         ]
 
     # train our model
-    # TODO: make sure there are no speed bottlenecks here when training on cached base model outputs
     model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1, callbacks=get_callbacks(),
                         validation_data=valid_generator, nb_val_samples=nb_valid_samples, class_weight=class_weights)
 
