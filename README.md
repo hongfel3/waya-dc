@@ -38,3 +38,8 @@ $ python3 wayadc/utils/get_datasets.py
 $ python3 train.py --help  # To see available options
 $ python3 train.py
 ```
+
+#### Notes
+
+* Make sure you use Waya.ai's [Keras fork](https://github.com/wayaai/keras) (see `requirements.txt`)
+
