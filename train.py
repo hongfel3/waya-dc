@@ -412,8 +412,10 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
             # reduce our model's lr and un-freeze layers in our base model as training progresses & `val_loss` plateaus
             callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1,
                                         layers_to_fine_tune=layers_to_fine_tune),
-            callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
-            # TODO: TensorBoard callback
+            callbacks.LambdaCallback(on_epoch_end=on_epoch_end),
+            # to launch: `$ tensorboard --logdir=/full_path_to_your_logs`
+            callbacks.TensorBoard(log_dir=os.path.join(cache_dir, 'tensor_board_logs'), histogram_freq=3,
+                                  write_graph=True, write_images=True)
         ]
 
     # train our model
