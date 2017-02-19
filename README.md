@@ -39,6 +39,13 @@ $ python3 train.py --help  # To see available options
 $ python3 train.py
 ```
 
+#### TensorBoard
+
+- Launch an AWS instance w/ custom security group added: `Custom TCP Rule | TCP | 6006 | 0.0.0.0/0` to allow incoming traffic on TensorBoard's port.
+- Launch a tmux session for training. See [tmux + EC2 + deep learning](https://medium.com/towards-data-science/deep-learning-aws-ec2-tmux-3b96777016e2#.5cz3d9u5b).
+- Exit tmux session (ctrl + b and then d) and run `$ tensorboard --logdir='cache/tensor_board_logs'`.
+- In the browser of your PC navigate to: `http://<AWS_PUBLIC_DNS>:6006`.
+
 #### Notes
 
 * Make sure you use Waya.ai's [Keras fork](https://github.com/wayaai/keras) (see [requirements.txt](https://github.com/wayaai/waya-dc/blob/master/requirements.txt)).
