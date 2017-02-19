@@ -12,6 +12,7 @@ Note: The most complicated code in this script is the caching/loading of base mo
 import collections
 import math
 import os
+import shutil
 
 import click
 from keras import applications
@@ -424,7 +425,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     # previous TensorBoard log dir should be removed before training or else it gets messed up
     try:
-        os.removedirs(os.path.join(cache_dir, 'tensor_board_logs'))
+        shutil.rmtree(os.path.join(cache_dir, 'tensor_board_logs'))
     except OSError:
         pass
 
