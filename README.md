@@ -1,6 +1,8 @@
 # waya-dc
 Image classification using deep convolutional neural networks.
 
+For a detailed introduction to this project read [Ground-up & hands-on deep learning tutorial — diagnosing skin cancer w/ dermatologist-level accuracy](https://medium.com/@waya.ai/ground-up-hands-on-deep-learning-tutorial-diagnosing-skin-cancer-w-dermatologist-level-61a90fe9f269#.ptayqfn20).
+
 
 ## Getting started
 
