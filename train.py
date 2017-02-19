@@ -422,6 +422,12 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                                   write_graph=True, write_images=True)
         ]
 
+    # previous TensorBoard log dir should be removed before training or else it gets messed up
+    try:
+        os.removedirs(os.path.join(cache_dir, 'tensor_board_logs'))
+    except OSError:
+        pass
+
     # train our model
     model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1,
                         callbacks=get_callbacks(), validation_data=valid_generator,
