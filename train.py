@@ -230,6 +230,10 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     assert train_generator.nb_class == valid_generator.nb_class, \
         'Train and valid data sets must have the same number of classes.'
 
+    # need to get nb of samples in each generator here in-case we are caching the base model's outputs
+    nb_train_samples = train_generator.nb_sample
+    nb_valid_samples = valid_generator.nb_sample
+
     def get_class_weights(generator):
         """
         Gets class weights for a data generator (i.e. train or valid).
@@ -419,9 +423,9 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         ]
 
     # train our model
-    model.fit_generator(train_generator, train_generator.nb_sample, nb_epoch=nb_epoch, verbose=1,
+    model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1,
                         callbacks=get_callbacks(), validation_data=valid_generator,
-                        nb_val_samples=valid_generator.nb_sample, class_weight=class_weights)
+                        nb_val_samples=nb_valid_samples, class_weight=class_weights)
 
 
 if __name__ == '__main__':
