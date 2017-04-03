@@ -77,7 +77,7 @@ def get_base_model(input_tensor, base_model_name):
     return base_model
 
 
-def cache_base_model_outputs(base_model, train_generator, valid_generator):
+def cache_base_model_outputs(base_model, generator, train_generator, valid_generator):
     """
     Saves base model output features for each input data sample to disc in .npy format.
 
@@ -95,7 +95,8 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator):
 
         print('Caching the base model\'s output features for the {} dataset to disc.'.format(dataset))
 
-        nb_batches = math.ceil(generator.nb_sample / generator.batch_size)
+        nb_sample = generator.index if dataset == 'train' else generator.valid_index
+        nb_batches = math.ceil(nb_sample / 32)
         for i in range(nb_batches):
             print('Caching base model\'s outputs, batch: {} of {} in the {} dataset.'.format(i, nb_batches, dataset))
 
@@ -212,7 +213,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         # now during training we don't have to do forward and backward passes through the base model over and over again
         # this speeds up training dramatically and since we aren't training our base model it doesn't inhibit us much
         # Note: can't do this if we want data augmentation or want to fine-tune the base model
-        cache_base_model_outputs(base_model, train_generator, valid_generator)
+        cache_base_model_outputs(base_model, generator, train_generator, valid_generator)
 
     if train_top_only:
         # the base model outputs are fixed (cached) and serve as the input data to our top model instead of images
