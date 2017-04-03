@@ -27,8 +27,7 @@ from wayadc.utils import image_generator
 
 path = os.path.dirname(os.path.abspath(__file__))
 cache_dir = os.path.join(path, 'cache')
-# data_dir = os.path.join(path, 'data')  # data sets are saved in this dir by `$ python3 wayadc/utils/get_datasets.py`
-data_dir = '/Users/mjdietzx/Documents/GitHub/waya-knowledge/scrape'
+data_dir = os.path.join(path, 'data')  # data sets are saved in this dir by `$ python3 wayadc/utils/get_datasets.py`
 
 cached_base_model_outputs = os.path.join(cache_dir, 'base_model_outputs_{}.npy')
 cached_labels = os.path.join(cache_dir, 'labels_{}.npy')
@@ -89,25 +88,27 @@ def cache_base_model_outputs(base_model, generator, train_generator, valid_gener
     :param train_generator: Keras data generator for our train dataset.
     :param valid_generator: Keras data generator for our valid dataset.
     """
-    for generator, dataset in zip([train_generator, valid_generator], ['train', 'valid']):
-        base_model_outputs = []
-        labels = []
-
+    for gen, dataset in zip([train_generator, valid_generator], ['train', 'valid']):
         print('Caching the base model\'s output features for the {} dataset to disc.'.format(dataset))
 
-        nb_sample = generator.index if dataset == 'train' else generator.valid_index
-        nb_batches = math.ceil(nb_sample / 32)
+        nb_samples = len(generator.index) if dataset == 'train' else len(generator.valid_index)
+        nb_batches = math.ceil(nb_samples / 32)
+
         for i in range(nb_batches):
             print('Caching base model\'s outputs, batch: {} of {} in the {} dataset.'.format(i, nb_batches, dataset))
 
-            image_batch, label_batch = next(generator)
-            base_model_outputs = base_model.predict(image_batch, batch_size=len(image_batch))
+            image_batch, label_batch = next(gen)
+            _base_model_outputs = base_model.predict(image_batch, batch_size=len(image_batch))
 
-            base_model_outputs.extend(base_model_outputs)
-            labels.extend(label_batch)
+            try:
+                base_model_outputs = np.append(base_model_outputs, _base_model_outputs, axis=0)
+                labels = np.append(labels, label_batch, axis=0)
+            except NameError:
+                base_model_outputs = _base_model_outputs
+                labels = label_batch
 
-        np.save(cached_base_model_outputs.format(dataset).split('.')[0], np.asarray(base_model_outputs))
-        np.save(cached_labels.format(dataset).split('.')[0], np.asarray(labels))
+        np.save(cached_base_model_outputs.format(dataset).split('.')[0], base_model_outputs)
+        np.save(cached_labels.format(dataset).split('.')[0], labels)
 
 
 def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
@@ -225,23 +226,23 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         model_input_tensor = base_model_input_tensor
         top_model_input_tensor = base_model.output
 
+        # freeze all layers in `base_model` so the pre-trained params aren't botched and prepare for fine-tuning
+        for layer in base_model.layers:
+            if layer.trainable_weights and fine_tune:
+                try:
+                    layers_to_fine_tune.append(layer)
+                except NameError:
+                    layers_to_fine_tune = [layer]
+
+            layer.trainable = False
+
+        try:
+            print('Layers to fine tune: {}.'.format(layers_to_fine_tune))
+        except NameError:
+            pass
+
     # get our model (either combined or only the classifier network based on `model_input_tensor`)
     model = get_model(top_model_input_tensor, len(labels), base_model_name, model_input_tensor=model_input_tensor)
-
-    # freeze all layers in `base_model` so the pre-trained params aren't botched and prepare for fine-tuning
-    for layer in base_model.layers:
-        if layer.trainable_weights and fine_tune:
-            try:
-                layers_to_fine_tune.append(layer)
-            except NameError:
-                layers_to_fine_tune = [layer]
-
-        layer.trainable = False
-
-    try:
-        print('Layers to fine tune: {}.'.format(layers_to_fine_tune))
-    except NameError:
-        pass
 
     # compile our model
     model.compile('adam', 'categorical_crossentropy', metrics=['accuracy'])
