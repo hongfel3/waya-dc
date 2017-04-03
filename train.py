@@ -1,33 +1,24 @@
 """
 Image classification using deep convolutional neural networks.
 
-Note: Only Python 3 support currently.
-
-Note: The most complicated code in this script is the caching/loading of base model outputs to/from TFRecordFiles.
-      It is not necessary to understand this code (and it is too slow right now to be useful anyways).
-      It seems to be the 'TensorFlow' way to properly store/load large data sets though so I've left the code in and
-      fixing it is an open issue. For now the fast & recommended way to do this is the default option (numpy npy files).
 """
 
-import collections
 import math
 import os
 import shutil
 
 import click
 from keras import applications
+from keras import backend as K
 from keras import callbacks
 from keras import layers
 from keras import models
-from keras.engine import training
-from keras.preprocessing import image
-from keras.utils import np_utils
 import numpy as np
 from sklearn import metrics
-import tensorflow as tf  # TensorFlow is not in `requirements.txt` - must be installed by user based on OS/hardware
 
 from dlutils import plot_image_batch_w_labels
 from wayadc.utils import helpers
+from wayadc.utils import image_generator
 
 
 #
@@ -35,13 +26,20 @@ from wayadc.utils import helpers
 #
 
 path = os.path.dirname(os.path.abspath(__file__))
-cache_dir = os.path.join(path, 'cache')  # cached base model outputs, model checkpoints, etc... are saved in this dir
-data_dir = os.path.join(path, 'data')  # data sets are saved in this dir by `$ python3 wayadc/utils/get_datasets.py`
+cache_dir = os.path.join(path, 'cache')
+# data_dir = os.path.join(path, 'data')  # data sets are saved in this dir by `$ python3 wayadc/utils/get_datasets.py`
+data_dir = '/Users/mjdietzx/Documents/GitHub/waya-knowledge/scrape'
+
+cached_base_model_outputs = os.path.join(cache_dir, 'base_model_outputs_{}.npy')
+cached_labels = os.path.join(cache_dir, 'labels_{}.npy')
+model_checkpoint = os.path.join(cache_dir, 'model_checkpoint.h5')
+valid_image_batch_plot = os.path.join(cache_dir, 'valid_image_batch_plot_{}.png')
+tensor_board_logs = os.path.join(cache_dir, 'tensor_board_logs/')
 
 
 def get_base_model(input_tensor, base_model_name):
     """
-    Get a pre-trained base model for transfer learning (and optionally fine tuning).
+    Get a pre-trained base model for transfer learning.
 
     :param input_tensor: Input tensor to the base model. There are some restrictions on the shape of this tensor
                          depending on which base model is being used.
@@ -79,38 +77,23 @@ def get_base_model(input_tensor, base_model_name):
     return base_model
 
 
-def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_record_format=False):
+def cache_base_model_outputs(base_model, train_generator, valid_generator):
     """
-    Saves base model output features for each input data sample to disc in TFRecord file format or .npy format.
+    Saves base model output features for each input data sample to disc in .npy format.
 
-    Each record w/in the TFRecord file is a serialized Example proto.
-    See: https://www.tensorflow.org/how_tos/reading_data/ for more info.
-
-    We cache base model outputs to greatly reduce training times when experimenting with
-    network architectures/hyper-parameters.
-
-    Note: One of the drawbacks of this is we can't do data augmentation or fine-tune the base model's weights.
-    See: https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#protobuf-library-related-issues
+    We cache base model outputs to greatly reduce training times when experimenting with network
+    architectures/hyper-parameters. One of the drawbacks of this is we can't do data augmentation or fine-tune the base
+    model's weights.
 
     :param base_model: The pre-trained base model.
     :param train_generator: Keras data generator for our train dataset.
     :param valid_generator: Keras data generator for our valid dataset.
-    :param tf_record_format: Flag indicating whether to cache as TFRecord or .npy (numpy array).
     """
-    def _bytes_feature(value):
-        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
     for generator, dataset in zip([train_generator, valid_generator], ['train', 'valid']):
-        if tf_record_format:
-            log_str = 'TFRecords'
-            writer = tf.python_io.TFRecordWriter(os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords'.
-                                                              format(dataset)))
-        else:
-            log_str = '.npy'
-            base_model_outputs_list = []
-            labels_list = []
+        base_model_outputs = []
+        labels = []
 
-        print('Saving base model\'s output features for the {} dataset to disc as a {} file.'.format(dataset, log_str))
+        print('Caching the base model\'s output features for the {} dataset to disc.'.format(dataset))
 
         nb_batches = math.ceil(generator.nb_sample / generator.batch_size)
         for i in range(nb_batches):
@@ -119,25 +102,11 @@ def cache_base_model_outputs(base_model, train_generator, valid_generator, tf_re
             image_batch, label_batch = next(generator)
             base_model_outputs = base_model.predict(image_batch, batch_size=len(image_batch))
 
-            if tf_record_format:
-                for j, base_model_output in enumerate(base_model_outputs):
-                    base_model_output_raw = base_model_output.tostring()
-                    label_raw = label_batch[j].tostring()
+            base_model_outputs.extend(base_model_outputs)
+            labels.extend(label_batch)
 
-                    example = tf.train.Example(features=tf.train.Features(feature={
-                        'base_model_output_features': _bytes_feature(base_model_output_raw),
-                        'label': _bytes_feature(label_raw)}))
-
-                    writer.write(example.SerializeToString())
-            else:
-                base_model_outputs_list.extend(base_model_outputs)
-                labels_list.extend(label_batch)
-
-        if tf_record_format:
-            writer.close()
-        else:
-            np.save(os.path.join(cache_dir, 'base_model_outputs_{}'.format(dataset)), np.asarray(base_model_outputs_list))
-            np.save(os.path.join(cache_dir, 'labels_{}'.format(dataset)), np.asarray(labels_list))
+        np.save(cached_base_model_outputs.format(dataset).split('.')[0], np.asarray(base_model_outputs))
+        np.save(cached_labels.format(dataset).split('.')[0], np.asarray(labels))
 
 
 def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
@@ -148,7 +117,7 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
-    x = layers.Dense(1024)(x)
+    x = layers.Dense(2048)(x)
     x = layers.BatchNormalization()(x)
     x = layers.advanced_activations.LeakyReLU()(x)
     x = layers.Dropout(0.25)(x)
@@ -157,39 +126,44 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
         model_input_tensor = top_model_input_tensor
 
     x = layers.Dense(nb_classes, activation='softmax')(x)
-    return models.Model(input=model_input_tensor, output=x)
+    return models.Model(inputs=[model_input_tensor], outputs=[x])
 
 
 @click.command()
-@click.option('--valid_dir', type=str, default='dermnetnz-scraped',
-              help='Sub-directory containing the valid data set (located in `data_dir`).')
-@click.option('--cache_base_model_features', default=False, type=bool,
-              help='Cache base model outputs for train and valid data sets to greatly reduce training times.')
-@click.option('--train_top_only', default=False, type=bool,
-              help='Train the top model (classifier network) on cached base model outputs.')
-@click.option('--base_model_name', default='resnet50', type=str,
-              help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
-@click.option('--fine_tune', default=False, type=bool,
-              help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
-@click.option('--tf_record_format', default=False, type=bool,
-              help='True if base model outputs/labels should be cached/loaded in TFRecordFile format. Else npy format.')
-def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune, tf_record_format):
-    # get list of directories for train and valid data sets to be passed to Keras generator
-    train_dirs = []
+@click.option('--valid_dir', type=str, default='dermnetnz-scraped', help='Sub-directory containing the valid data set (located in `data_dir`).')
+@click.option('--cache_base_model_features', default=False, type=bool, help='Cache base model outputs for train and valid data sets to greatly reduce training times.')
+@click.option('--train_top_only', default=False, type=bool, help='Train the top model (classifier network) on cached base model outputs.')
+@click.option('--base_model_name', default='resnet50', type=str, help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
+@click.option('--fine_tune', default=False, type=bool, help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
+def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune):
+    """
+    Training.
+
+    """
+    train_dirs = set()
+    labels = set()
+
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
-        if dataset_dir == valid_dir:  # or dataset_dir == 'noisy-scrape':  # don't use noisy-scrape for now
+        if dataset_dir != 'data-scraped-dermnet':
             continue
-        train_dirs.append(os.path.join(data_dir, dataset_dir))
 
-    valid_dirs = os.path.join(data_dir, valid_dir)
+        dataset_dir_path = os.path.join(data_dir, dataset_dir)
+        image_details_file_path = os.path.join(dataset_dir_path, 'image_details.pickle')
 
-    # make sure no valid data sets are also train
-    for valid_dir in valid_dirs:
-        assert valid_dir not in train_dirs
+        with open(image_details_file_path, 'rb') as handle:
+            import pickle
+            image_details = pickle.load(handle)
+
+        for key in image_details:
+            labels.add(image_details.get(key).get('parent_diagnosis'))
+
+        train_dirs.add(os.path.join(data_dir, dataset_dir))
+
+    labels = sorted(list(labels))
+    print(labels)
 
     #
-    # image dimensions
-    # Note: base models used for pre-training usually have requirements/preferences for input dimensions
+    # image dimensions - base models used for pre-training usually have requirements/preferences for input dimensions
     #
 
     img_width = 299
@@ -207,42 +181,16 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # data generators
     #
 
-    # there are lots of optional params for data augmentation that can be used here
-    data_generator = image.ImageDataGenerator(
-        # NOTE: if we are using `data_generator` for a cached base model output generator we don't want
-        # `preprocessing_function` but our Keras branch ignores this in this case so it isn't a bug
-        preprocessing_function=applications.xception.preprocess_input,  # normalize data so entries are in range [-1, 1]
-        dim_ordering='tf')
+    generator = image_generator.ImageGenerator(train_dirs, labels=labels, valid_split=0.2)
+    train_generator = generator.image_generator(batch_size,
+                                                (img_width, img_height),
+                                                pre_processing_function=applications.xception.preprocess_input)
+    valid_generator = generator.image_generator(batch_size,
+                                                (img_width, img_height),
+                                                pre_processing_function=applications.xception.preprocess_input,
+                                                valid=True)
 
-    flow_from_directory_params = {'target_size': (img_height, img_width),
-                                  'color_mode': 'grayscale' if img_channels == 1 else 'rgb',
-                                  'class_mode': 'categorical',
-                                  'batch_size': batch_size}
-
-    train_generator = data_generator.flow_from_directory(
-        directory=train_dirs,  # list of directories corresponding to each specific data set
-        **flow_from_directory_params)
-
-    valid_generator = data_generator.flow_from_directory(
-        directory=valid_dirs,
-        **flow_from_directory_params)
-
-    nb_classes = train_generator.nb_class
-    assert train_generator.nb_class == valid_generator.nb_class, \
-        'Train and valid data sets must have the same number of classes.'
-
-    # need to get nb of samples in each generator here in-case we are caching the base model's outputs
-    nb_train_samples = train_generator.nb_sample
-    nb_valid_samples = valid_generator.nb_sample
-
-    def get_class_weights(generator):
-        """
-        Gets class weights for a data generator (i.e. train or valid).
-
-        :param generator: The Keras data generator.
-        :return: Dictionary where keys correspond to the class index and values corresponds to the class's weight.
-        """
-        nb_samples_per_class = dict(collections.Counter(generator.classes))  # see `image.DirectoryIterator.__init__()`
+    def get_class_weights(nb_samples_per_class):
         print('Number of samples per class: {}.'.format(nb_samples_per_class))
 
         weights = {}
@@ -252,7 +200,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         return weights
 
     # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
-    class_weights = get_class_weights(train_generator)
+    class_weights = get_class_weights(generator.label_sizes)
     print(class_weights)
 
     # load the pre-trained base model
@@ -264,7 +212,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         # now during training we don't have to do forward and backward passes through the base model over and over again
         # this speeds up training dramatically and since we aren't training our base model it doesn't inhibit us much
         # Note: can't do this if we want data augmentation or want to fine-tune the base model
-        cache_base_model_outputs(base_model, train_generator, valid_generator, tf_record_format=tf_record_format)
+        cache_base_model_outputs(base_model, train_generator, valid_generator)
 
     if train_top_only:
         # the base model outputs are fixed (cached) and serve as the input data to our top model instead of images
@@ -272,167 +220,132 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         top_model_input_tensor = layers.Input(shape=base_model.output_shape[1:])
         assert not fine_tune, 'Fine-tuning can not be done if we are only training the top model.'
     else:
-        # base model and top model will be combined into one model. the inputs to this model are images
+        # base model and top model will be combined into one model
         model_input_tensor = base_model_input_tensor
         top_model_input_tensor = base_model.output
 
-    # get our model (either combined or only the classifier ntwk based on `model_input_tensor`)
-    model = get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=model_input_tensor)
+    # get our model (either combined or only the classifier network based on `model_input_tensor`)
+    model = get_model(top_model_input_tensor, len(labels), base_model_name, model_input_tensor=model_input_tensor)
 
-    if fine_tune:
-        layers_to_fine_tune = []
-    else:
-        layers_to_fine_tune = None
-
-    # freeze all layers in `base_model` so the pre-trained params aren't botched and prepare for fine tuning (if True)
+    # freeze all layers in `base_model` so the pre-trained params aren't botched and prepare for fine-tuning
     for layer in base_model.layers:
-        # `layers_to_fine_tune` will be passed to a Keras callback and layers will be popped off and made trainable
-        # as training progresses, and metrics (i.e. `valid_loss`) plateau/learning rate decreases
-        if len(layer.trainable_weights) > 0 and fine_tune:
-            layers_to_fine_tune.append(layer)  # Note: this means batch norm layers will be fine-tuned
+        if layer.trainable_weights and fine_tune:
+            try:
+                layers_to_fine_tune.append(layer)
+            except NameError:
+                layers_to_fine_tune = [layer]
 
         layer.trainable = False
 
+    try:
+        print('Layers to fine tune: {}.'.format(layers_to_fine_tune))
+    except NameError:
+        pass
+
     # compile our model
     model.compile('adam', 'categorical_crossentropy', metrics=['accuracy'])
+    lr = K.get_value(model.optimizer.lr)
 
-    # print info for each layer in model, this helps prevent bugs
+    # print model info - this helps prevent bugs
     print(model.summary())
 
-    if train_top_only:
-        if not tf_record_format:
-            base_model_outputs_train = np.load(os.path.join(cache_dir, 'base_model_outputs_train.npy'))
-            labels_train = np.load(os.path.join(cache_dir, 'labels_train.npy'))
-            base_model_outputs_valid = np.load(os.path.join(cache_dir, 'base_model_outputs_valid.npy'))
-            labels_valid = np.load(os.path.join(cache_dir, 'labels_valid.npy'))
+    # previous TensorBoard log dir should be removed before training
+    try:
+        shutil.rmtree(tensor_board_logs)
+    except OSError:
+        pass
 
-            # since only training the top model, over-ride image generators with cached base model output generators
-            # NOTE: `cached_features` tells NumpyArrayIterator we are using cached base model outputs (changes behavior)
-            train_generator = image.NumpyArrayIterator(base_model_outputs_train, labels_train, data_generator,
-                                                       batch_size=batch_size, shuffle=True, cached_features=True)
-            valid_generator = image.NumpyArrayIterator(base_model_outputs_valid, labels_valid,  data_generator,
-                                                       batch_size=batch_size, shuffle=True, cached_features=True)
-        else:
-            # TODO: this is unusably slow and suspect in general
-            def base_model_output_generator(dataset):
-                """
-                Generator function that yields batches of base model output features and corresponding labels.
-
-                :param dataset: Whether to yield batches of data/labels from the 'train' or 'valid' TFRecordFile.
-                """
-                # infinite, shuffled iteration over data stored in the TFRecordFile
-                while True:
-                    base_model_output_features_batch = []
-                    label_batch = []
-
-                    # must register a tensorflow session to convert tensors read from TFRecordFiles to numpy arrays
-                    with tf.Session() as _:
-                        while len(base_model_output_features_batch) != batch_size:
-                            serialized_example = next(tf.python_io.tf_record_iterator(
-                                os.path.join(cache_dir, 'base_model_outputs_{}.tfrecords'.format(dataset))))
-
-                            # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/how_tos/reading_data/fully_connected_reader.py#L50
-                            features = tf.parse_single_example(
-                                serialized_example,
-                                features={'base_model_output_features': tf.FixedLenFeature([], tf.string),
-                                          'label': tf.FixedLenFeature([], tf.string)}
-                            )
-
-                            b = tf.decode_raw(features.get('base_model_output_features'), out_type=tf.float32)
-                            b = tf.reshape(b, shape=base_model.output_shape[1:])
-
-                            l = tf.decode_raw(features.get('label'), out_type=tf.float32)
-                            l = tf.reshape(l, shape=(nb_classes, ))
-
-                            base_model_output_features_batch.append(b.eval())
-                            label_batch.append(l.eval())
-
-                    yield np.asarray(base_model_output_features_batch), np.asarray(label_batch)
-
-            train_generator = base_model_output_generator('train')
-            valid_generator = base_model_output_generator('valid')
-
-    def on_epoch_end(epoch, logs={}):
+    def on_epoch_end(epoch, _):
         """
         Anonymous function called after each epoch of training, registered with the `LambdaCallback`.
 
-        Plots a batch of valid images along w/ their true labels and the model's predicted labels and saves to `cache/`
-        and prints the confusion matrix for this batch of valid images.
+        For a batch of valid images:
+            - Print confusion matrix.
+            - Save image plot with predicted/true labels to disc.
+
+        As training progresses:
+            - Un-freeze layers in base model for fine-tuning.
+            - TODO: Remove noisy data sets.
         """
         image_batch, label_batch = next(valid_generator)
-        label_batch = np_utils.categorical_probas_to_classes(label_batch)
-
         predicted_labels = model.predict_on_batch(image_batch)
-        predicted_labels = np_utils.categorical_probas_to_classes(predicted_labels)
 
-        # cached base model outputs can't be plotted and noisy data set(s) can't be removed
+        # categorical (one-hot encoded) => binary (class)
+        label_batch = np.nonzero(label_batch)[1]
+        predicted_labels = np.nonzero(predicted_labels)[1]
+
+        # confusion matrix
+        print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
+
         if not train_top_only:
             # plot
             label_batch_strings = []
             for true_label, predicted_label in zip(label_batch, predicted_labels):
                 label_batch_strings.append('True: {}, Predicted: {}'.format(true_label, predicted_label))
 
-            try:
-                plot_image_batch_w_labels.plot_batch(image_batch, os.path.join(cache_dir, 'plot_{}.png'.format(epoch)),
-                                                     label_batch=label_batch_strings)
-            except TypeError:
-                # TODO: fix bug in `deep-learning-utils`: TypeError: 'AxesSubplot' object does not support indexing
-                pass
+            plot_image_batch_w_labels.plot_batch(image_batch,
+                                                 valid_image_batch_plot.format(epoch),
+                                                 label_batch=label_batch_strings)
 
-            # remove noisy data set(s) (this is a little hacky and requires knowledge of the inner-workings of Keras)
-            if epoch == 12:
-                # now that the lr is low, let's remove noisy data set(s) and touch up our model on very clean data
-                train_dirs.remove(os.path.join(data_dir, 'noisy-scrape'))
-                print('Removing noisy data sets. Model will be trained on: {}.'.format(train_dirs))
+            # un-freeze
+            if fine_tune:
+                global lr
+                _lr = K.get_value(model.optimizer.lr)
+                if _lr < lr:
+                    try:
+                        layer = layers_to_fine_tune.pop()
+                    except IndexError and NameError:
+                        return
 
-                # reset `train_generator` to generate images from new `train_dirs`
-                train_generator = data_generator.flow_from_directory(
-                    directory=train_dirs,
-                    **flow_from_directory_params)
+                    print('Un-freezing {}.'.format(layer.name))
+                    layer.trainable = True
 
-                # stop the old `GeneratorEnqueuer`
-                model.enqueuer.stop()
+                    # model needs to be re-compiled for `layer.trainable` to take effect
+                    model.compile(model.optimizer, model.loss, model.metrics)
 
-                # create and start a new `GeneratorEnqueuer` that uses our new `train_generator`
-                model.enqueuer = training.GeneratorEnqueuer(train_generator)
-                model.enqueuer.start()
-
-        # confusion matrix
-        print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
+                    lr = _lr
 
     def get_callbacks():
         """
-        Helper function to get callbacks to be passed to `model.fit_generator`.
+        :return: A list of `keras.callbacks.Callback` instances to apply during training.
 
-        :return: A list of Keras callbacks to be executed while training our model.
         """
         return [
-            callbacks.EarlyStopping(monitor='val_loss', patience=24, verbose=1),
-            callbacks.ModelCheckpoint(os.path.join(cache_dir, 'model_checkpoint.h5'), monitor='val_acc',
-                                      save_best_only=True, verbose=1),
-            # make sure the top model is trained before starting to fine tune the base model so large gradients don't
-            # botch the base model's pre-trained weights
-            # the learning rate should be decreased substantially as the base model's layers are made trainable
-            # for this same reason
-            # reduce our model's lr and un-freeze layers in our base model as training progresses & `val_loss` plateaus
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1,
-                                        layers_to_fine_tune=layers_to_fine_tune),
+            callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', verbose=1, save_best_only=True),
+            callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
+            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1),
             callbacks.LambdaCallback(on_epoch_end=on_epoch_end),
-            # to launch: `$ tensorboard --logdir=/full_path_to_your_logs`
-            callbacks.TensorBoard(log_dir=os.path.join(cache_dir, 'tensor_board_logs'), histogram_freq=3,
-                                  write_graph=True, write_images=True)
+            callbacks.TensorBoard(log_dir=tensor_board_logs, histogram_freq=4, write_graph=True, write_images=True)
         ]
 
-    # previous TensorBoard log dir should be removed before training or else it gets messed up
-    try:
-        shutil.rmtree(os.path.join(cache_dir, 'tensor_board_logs'))
-    except OSError:
-        pass
+    # train model
+    if train_top_only:
+        # load cached data
+        base_model_outputs_train = np.load(cached_base_model_outputs.format('train'))
+        labels_train = np.load(cached_labels.format('train'))
+        base_model_outputs_valid = np.load(cached_base_model_outputs.format('valid'))
+        labels_valid = np.load(cached_labels.format('valid'))
 
-    # train our model
-    model.fit_generator(train_generator, nb_train_samples, nb_epoch=nb_epoch, verbose=1,
-                        callbacks=get_callbacks(), validation_data=valid_generator,
-                        nb_val_samples=nb_valid_samples, class_weight=class_weights)
+        model.fit(x=base_model_outputs_train,
+                  y=labels_train,
+                  batch_size=batch_size,
+                  epochs=nb_epoch,
+                  verbose=1,
+                  callbacks=get_callbacks(),
+                  validation_data=(base_model_outputs_valid, labels_valid),
+                  class_weight=class_weights)
+
+    else:
+        model.fit_generator(generator=train_generator,
+                            steps_per_epoch=math.ceil(len(generator.index) / batch_size),
+                            epochs=nb_epoch,
+                            verbose=1,
+                            callbacks=get_callbacks(),
+                            validation_data=valid_generator,
+                            validation_steps=math.ceil(len(generator.valid_index) / batch_size),
+                            class_weight=class_weights,
+                            workers=4,
+                            pickle_safe=True)
 
 
 if __name__ == '__main__':
