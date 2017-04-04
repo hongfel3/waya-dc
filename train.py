@@ -279,7 +279,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         # categorical (one-hot encoded) => binary (class)
         label_batch = np.nonzero(label_batch)[1]
         # softmax of probabilities
-        predicted_labels = np.argmax(predicted_labels, axis=0)
+        predicted_labels = np.argmax(predicted_labels, axis=-1)
 
         # confusion matrix
         print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
