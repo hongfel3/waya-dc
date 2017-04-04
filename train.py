@@ -86,6 +86,7 @@ def cache_base_model_outputs(base_model, generator, train_generator, valid_gener
     model's weights.
 
     :param base_model: The pre-trained base model.
+    :param generator: .
     :param train_generator: Keras data generator for our train dataset.
     :param valid_generator: Keras data generator for our valid dataset.
     """
@@ -122,7 +123,7 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
-    x = layers.Dense(2048)(x)
+    x = layers.Dense(1024)(x)
     x = layers.BatchNormalization()(x)
     x = layers.advanced_activations.LeakyReLU()(x)
     x = layers.Dropout(0.25)(x)
@@ -277,7 +278,8 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
         # categorical (one-hot encoded) => binary (class)
         label_batch = np.nonzero(label_batch)[1]
-        predicted_labels = np.nonzero(predicted_labels)[1]
+        # softmax of probabilities
+        predicted_labels = np.argmax(predicted_labels, axis=0)
 
         # confusion matrix
         print('\n--\n{}\n--\n'.format(metrics.confusion_matrix(label_batch, predicted_labels)))
