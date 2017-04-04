@@ -13,6 +13,7 @@ from keras import backend as K
 from keras import callbacks
 from keras import layers
 from keras import models
+from keras import optimizers
 import numpy as np
 from sklearn import metrics
 
@@ -109,6 +110,8 @@ def cache_base_model_outputs(base_model, generator, train_generator, valid_gener
 
         np.save(cached_base_model_outputs.format(dataset).split('.')[0], base_model_outputs)
         np.save(cached_labels.format(dataset).split('.')[0], labels)
+        del base_model_outputs
+        del labels
 
 
 def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_tensor=None):
@@ -291,7 +294,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
             # un-freeze
             if fine_tune:
-                global lr
+                nonlocal lr
                 _lr = K.get_value(model.optimizer.lr)
                 if _lr < lr:
                     try:
@@ -302,8 +305,11 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                     print('Un-freezing {}.'.format(layer.name))
                     layer.trainable = True
 
+                    _lr = min(_lr, 1e-4)
+                    optimizer = optimizers.SGD(lr=_lr, momentum=0.9)
+
                     # model needs to be re-compiled for `layer.trainable` to take effect
-                    model.compile(model.optimizer, model.loss, model.metrics)
+                    model.compile(optimizer, model.loss, model.metrics)
 
                     lr = _lr
 
