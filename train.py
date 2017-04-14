@@ -136,7 +136,7 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
 
 
 @click.command()
-@click.option('--valid_dir', type=str, default='dermnetnz-scraped', help='Sub-directory containing the valid data set (located in `data_dir`).')
+@click.option('--valid_dir', type=str, default='data-scraped-dermnetnz', help='Sub-directory containing the valid data set (located in `data_dir`).')
 @click.option('--cache_base_model_features', default=False, type=bool, help='Cache base model outputs for train and valid data sets to greatly reduce training times.')
 @click.option('--train_top_only', default=False, type=bool, help='Train the top model (classifier network) on cached base model outputs.')
 @click.option('--base_model_name', default='resnet50', type=str, help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
@@ -147,26 +147,18 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     """
     train_dirs = set()
-    labels = set()
 
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
-        if dataset_dir != 'data-scraped-dermnet':
+        if dataset_dir == valid_dir or not dataset_dir.startswith('data-scraped-'):
             continue
 
         dataset_dir_path = os.path.join(data_dir, dataset_dir)
-        image_details_file_path = os.path.join(dataset_dir_path, 'image_details.pickle')
+        train_dirs.add(dataset_dir_path)
 
-        with open(image_details_file_path, 'rb') as handle:
-            import pickle
-            image_details = pickle.load(handle)
+    valid_dirs = {os.path.join(data_dir, valid_dir)}
+    assert not train_dirs.intersection(valid_dirs)
 
-        for key in image_details:
-            labels.add(image_details.get(key).get('parent_diagnosis'))
-
-        train_dirs.add(os.path.join(data_dir, dataset_dir))
-
-    labels = sorted(list(labels))
-    print(labels)
+    print(train_dirs, valid_dirs)
 
     #
     # image dimensions - base models used for pre-training usually have requirements/preferences for input dimensions
@@ -187,14 +179,21 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # data generators
     #
 
-    generator = image_generator.ImageGenerator(train_dirs, labels=labels, valid_split=0.2)
+    generator = image_generator.ImageGenerator(train_dirs)
+    v_generator = image_generator.ImageGenerator(valid_dirs)
+
+    labels = generator._groups
+    print(labels)
+
+    assert labels == v_generator._groups
+
     train_generator = generator.image_generator(batch_size,
                                                 (img_width, img_height),
                                                 pre_processing_function=applications.xception.preprocess_input)
-    valid_generator = generator.image_generator(batch_size,
-                                                (img_width, img_height),
-                                                pre_processing_function=applications.xception.preprocess_input,
-                                                valid=True)
+
+    valid_generator = v_generator.image_generator(batch_size,
+                                                  (img_width, img_height),
+                                                  pre_processing_function=applications.xception.preprocess_input)
 
     def get_class_weights(nb_samples_per_class):
         print('Number of samples per class: {}.'.format(nb_samples_per_class))
@@ -352,7 +351,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                             verbose=1,
                             callbacks=get_callbacks(),
                             validation_data=valid_generator,
-                            validation_steps=math.ceil(len(generator.valid_index) / batch_size),
+                            validation_steps=math.ceil(len(v_generator.index) / batch_size),
                             class_weight=class_weights,
                             workers=4,
                             pickle_safe=True)
