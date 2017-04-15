@@ -9,11 +9,9 @@ import shutil
 
 import click
 from keras import applications
-from keras import backend as K
 from keras import callbacks
 from keras import layers
 from keras import models
-from keras import optimizers
 import numpy as np
 from sklearn import metrics
 
@@ -123,11 +121,6 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
     else:
         assert False, 'Classifier network not implemented for base model: {}.'.format(base_model_name)
 
-    x = layers.Dense(1024)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.advanced_activations.LeakyReLU()(x)
-    x = layers.Dropout(0.25)(x)
-
     if model_input_tensor is None:
         model_input_tensor = top_model_input_tensor
 
@@ -140,14 +133,13 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
 @click.option('--cache_base_model_features', default=False, type=bool, help='Cache base model outputs for train and valid data sets to greatly reduce training times.')
 @click.option('--train_top_only', default=False, type=bool, help='Train the top model (classifier network) on cached base model outputs.')
 @click.option('--base_model_name', default='resnet50', type=str, help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
-@click.option('--fine_tune', default=False, type=bool, help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
+@click.option('--fine_tune', default=True, type=bool, help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
 def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune):
     """
     Training.
 
     """
     train_dirs = set()
-
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
         if dataset_dir == valid_dir or not dataset_dir.startswith('data-scraped-'):
             continue
@@ -164,15 +156,15 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     # image dimensions - base models used for pre-training usually have requirements/preferences for input dimensions
     #
 
-    img_width = 299
-    img_height = 299
+    img_width = 224
+    img_height = 224
     img_channels = 3
 
     #
     # training params
     #
 
-    batch_size = 32  # some GPUs don't have enough memory for large batch sizes
+    batch_size = 128  # some GPUs don't have enough memory for large batch sizes
     nb_epoch = 50
 
     #
@@ -231,13 +223,15 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
         # freeze all layers in `base_model` so the pre-trained params aren't botched and prepare for fine-tuning
         for layer in base_model.layers:
+            if layer.name.startswith('res3'):
+                break
+
+            layer.trainable = False
             if layer.trainable_weights and fine_tune:
                 try:
                     layers_to_fine_tune.append(layer)
                 except NameError:
                     layers_to_fine_tune = [layer]
-
-            layer.trainable = False
 
         try:
             print('Layers to fine tune: {}.'.format(layers_to_fine_tune))
@@ -249,7 +243,6 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
 
     # compile our model
     model.compile('adam', 'categorical_crossentropy', metrics=['accuracy'])
-    lr = K.get_value(model.optimizer.lr)
 
     # print model info - this helps prevent bugs
     print(model.summary())
@@ -294,25 +287,17 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
                                                  label_batch=label_batch_strings)
 
             # un-freeze
-            if fine_tune:
-                nonlocal lr
-                _lr = K.get_value(model.optimizer.lr)
-                if _lr < lr:
-                    try:
-                        layer = layers_to_fine_tune.pop()
-                    except IndexError and NameError:
-                        return
+            if fine_tune and epoch != 0 and not epoch % 4:
+                try:
+                    _layer = layers_to_fine_tune.pop()
+                except IndexError and NameError:
+                    return
 
-                    print('Un-freezing {}.'.format(layer.name))
-                    layer.trainable = True
+                print('Un-freezing {}.'.format(_layer.name))
+                _layer.trainable = True
 
-                    _lr = min(_lr, 1e-4)
-                    optimizer = optimizers.SGD(lr=_lr, momentum=0.9)
-
-                    # model needs to be re-compiled for `layer.trainable` to take effect
-                    model.compile(optimizer, model.loss, model.metrics)
-
-                    lr = _lr
+                # model needs to be re-compiled for `layer.trainable` to take effect
+                model.compile(model.optimizer, model.loss, model.metrics)
 
     def get_callbacks():
         """
@@ -321,8 +306,8 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         """
         return [
             callbacks.ModelCheckpoint(model_checkpoint, monitor='val_acc', verbose=1, save_best_only=True),
-            callbacks.EarlyStopping(monitor='val_loss', patience=12, verbose=1),
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1),
+            callbacks.EarlyStopping(monitor='val_loss', patience=24, verbose=1),
+            # callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.6, patience=2, verbose=1),
             callbacks.LambdaCallback(on_epoch_end=on_epoch_end),
             callbacks.TensorBoard(log_dir=tensor_board_logs, histogram_freq=4, write_graph=True, write_images=True)
         ]

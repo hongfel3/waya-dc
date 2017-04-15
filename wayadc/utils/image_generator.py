@@ -1,12 +1,23 @@
 import os
 import pickle
 import random
+import re
 
 import numpy as np
 from PIL import Image
 
-from wdata.scrape import scrape_dermweb
 from wayadc.utils import helpers
+
+
+def pre_process_diagnosis_name(diagnosis_name):
+    diagnosis_name = re.sub(r'\(.*?\)', '', diagnosis_name).strip()
+
+    tmp = diagnosis_name.lower()
+
+    tmp = re.sub(r'[-/ \n]', r'_', tmp)
+    tmp = re.sub(r'[,()\']', r'', tmp)
+
+    return re.sub(r'_+', ' ', tmp)
 
 
 class ImageGenerator(object):
@@ -40,7 +51,6 @@ class ImageGenerator(object):
         self._groups = sorted(list(groups))
 
         for data_dir in data_dirs:
-            image_files = helpers.list_dir(data_dir, images_only=True)
             image_details_file_path = os.path.join(data_dir, 'image_details.pickle')
 
             with open(image_details_file_path, 'rb') as handle:
@@ -55,7 +65,7 @@ class ImageGenerator(object):
 
                 diagnosis = image_details.get(image_file_name).get('diagnosis')
                 # to make sure this is consistent across data sets
-                diagnosis = scrape_dermweb.pre_process_diagnosis_name(diagnosis)
+                diagnosis = pre_process_diagnosis_name(diagnosis)
 
                 cluster = self.diagnosis_to_cluster.get(diagnosis)
                 group = self.cluster_to_group.get(cluster)
@@ -78,12 +88,13 @@ class ImageGenerator(object):
                     if os.path.isfile(image_file_path):
                         # make sure this is a valid image file
                         try:
-                            im = Image.open(image_file_path)
-                            self.label_sizes[class_index] = self.label_sizes.get(class_index, 0) + 1
-                            self.index.append((image_file_path, class_index, group_index))
+                            _ = Image.open(image_file_path)
                         except Exception:
                             nb_discarded += 1
                             break
+
+                        self.label_sizes[group_index] = self.label_sizes.get(group_index, 0) + 1
+                        self.index.append((image_file_path, class_index, group_index))
 
             print('Discarded: {}.'.format(nb_discarded))
 
