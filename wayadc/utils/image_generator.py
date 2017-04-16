@@ -124,7 +124,7 @@ class ImageGenerator(object):
                 label_batch = []
 
                 for i in range(batch_size):
-                    im, label, group = self.__getitem__(batch * batch_size + i)
+                    im, group = self.__getitem__(batch * batch_size + i)
                     image_batch.append(im)
                     label_batch.append(group)
 
@@ -150,7 +150,7 @@ class ImageGenerator(object):
         im = im.convert('RGB')
         im = self.transformation_pipeline(im)
 
-        return im, self.identity_matrix_labels[label], self.identity_matrix_groups[group]
+        return im, self.identity_matrix_groups[group]
 
     def __len__(self):
         return len(self.index)

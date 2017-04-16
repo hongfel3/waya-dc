@@ -198,7 +198,7 @@ def main():
 
     train_transform = transforms.Compose([
         transforms.Scale(size=256, interpolation=Image.ANTIALIAS),
-        transforms.RandomSizedCrop(size=(img_height, img_width), interpolation=Image.ANTIALIAS),
+        transforms.RandomSizedCrop(size=img_height, interpolation=Image.ANTIALIAS),
         transforms.RandomHorizontalFlip(),
         transforms.Lambda(lambd=lambda im: im.transpose(Image.FLIP_TOP_BOTTOM) if random.random() < 0.5 else im),
         transforms.ToTensor(),
@@ -206,7 +206,7 @@ def main():
 
     valid_transform = transforms.Compose([
         transforms.Scale(size=256, interpolation=Image.ANTIALIAS),
-        transforms.CenterCrop(size=(img_height, img_width)),
+        transforms.CenterCrop(size=img_height),
         transforms.ToTensor(),
     ])
 
