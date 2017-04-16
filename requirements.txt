@@ -5,3 +5,4 @@ git+https://github.com/fchollet/keras.git
 numpy
 pytest
 sklearn
+torchvision

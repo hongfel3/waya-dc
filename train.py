@@ -135,17 +135,16 @@ def get_model(top_model_input_tensor, nb_classes, base_model_name, model_input_t
 @click.option('--base_model_name', default='resnet50', type=str, help='Name of the pre-trained base model to use for transfer learning and optionally fine-tuning.')
 @click.option('--fine_tune', default=True, type=bool, help='Fine tuning un-freezes top layers in the base model, training them on our data set.')
 def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, fine_tune):
-    """
-    Training.
+    #
+    # set up train and valid dirs
+    #
 
-    """
     train_dirs = set()
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
         if dataset_dir == valid_dir or not dataset_dir.startswith('data-scraped-'):
             continue
 
-        dataset_dir_path = os.path.join(data_dir, dataset_dir)
-        train_dirs.add(dataset_dir_path)
+        train_dirs.add(os.path.join(data_dir, dataset_dir))
 
     valid_dirs = {os.path.join(data_dir, valid_dir)}
     assert not train_dirs.intersection(valid_dirs)
@@ -153,7 +152,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     print(train_dirs, valid_dirs)
 
     #
-    # image dimensions - base models used for pre-training usually have requirements/preferences for input dimensions
+    # image dimensions - pre-trained base models usually have requirements/preferences for input dimensions
     #
 
     img_width = 224
@@ -165,7 +164,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     #
 
     batch_size = 128  # some GPUs don't have enough memory for large batch sizes
-    nb_epoch = 50
+    nb_epoch = 150
 
     #
     # data generators
@@ -182,7 +181,6 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
     train_generator = generator.image_generator(batch_size,
                                                 (img_width, img_height),
                                                 pre_processing_function=applications.xception.preprocess_input)
-
     valid_generator = v_generator.image_generator(batch_size,
                                                   (img_width, img_height),
                                                   pre_processing_function=applications.xception.preprocess_input)
@@ -217,7 +215,7 @@ def main(valid_dir, cache_base_model_features, train_top_only, base_model_name, 
         top_model_input_tensor = layers.Input(shape=base_model.output_shape[1:])
         assert not fine_tune, 'Fine-tuning can not be done if we are only training the top model.'
     else:
-        # base model and top model will be combined into one model
+        # combine base model and top model
         model_input_tensor = base_model_input_tensor
         top_model_input_tensor = base_model.output
 

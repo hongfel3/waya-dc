@@ -3,6 +3,7 @@ import pickle
 import random
 import re
 
+from keras.applications import xception
 import numpy as np
 from PIL import Image
 
@@ -20,17 +21,17 @@ def pre_process_diagnosis_name(diagnosis_name):
     return re.sub(r'_+', ' ', tmp)
 
 
+# TODO: `valid_split` not working
 class ImageGenerator(object):
-    def __init__(self, data_dirs, valid_split=None):
+    def __init__(self, data_dirs, target_size, transformation_pipeline=None, valid_split=None):
+        self.target_size = target_size
+        self.transformation_pipeline = transformation_pipeline
         self.valid_split = valid_split
 
         self.index = []
         self.label_sizes = {}
 
-        # sets do not support indexing
-        for data_dir in data_dirs:
-            data_directory = os.path.join(data_dir, os.pardir)
-            break
+        data_directory = os.path.join(list(data_dirs)[0], os.pardir)
 
         diagnosis_to_cluster_file_path = os.path.join(data_directory, 'diagnoses_to_cluster.pickle')
         with open(diagnosis_to_cluster_file_path, 'rb') as handle:
@@ -50,6 +51,9 @@ class ImageGenerator(object):
             groups.add(group)
         self._groups = sorted(list(groups))
 
+        self.identity_matrix_labels = np.eye(len(self._labels))
+        self.identity_matrix_groups = np.eye(len(self._groups))
+
         for data_dir in data_dirs:
             image_details_file_path = os.path.join(data_dir, 'image_details.pickle')
 
@@ -64,7 +68,6 @@ class ImageGenerator(object):
                     continue
 
                 diagnosis = image_details.get(image_file_name).get('diagnosis')
-                # to make sure this is consistent across data sets
                 diagnosis = pre_process_diagnosis_name(diagnosis)
 
                 cluster = self.diagnosis_to_cluster.get(diagnosis)
@@ -88,7 +91,8 @@ class ImageGenerator(object):
                     if os.path.isfile(image_file_path):
                         # make sure this is a valid image file
                         try:
-                            _ = Image.open(image_file_path)
+                            with Image.open(image_file_path) as _:
+                                pass
                         except Exception:
                             nb_discarded += 1
                             break
@@ -104,11 +108,15 @@ class ImageGenerator(object):
             x = int(len(self.index) * valid_split)
             random.shuffle(self.index)
 
-            self.valid_index = self.index[:x]
             self.index = self.index[x:]
+            self.valid_index = self.index[:x]
 
-    def image_generator(self, batch_size, target_size, pre_processing_function=None, valid=False):
-        index = self.valid_index if valid else self.index
+    def image_generator(self, batch_size, valid=False):
+        if valid:
+            assert self.valid_split
+            index = self.valid_index
+        else:
+            index = self.index
 
         def epoch():
             for batch in range(len(index) // batch_size):
@@ -116,29 +124,33 @@ class ImageGenerator(object):
                 label_batch = []
 
                 for i in range(batch_size):
-                    try:
-                        image_file_path, label, group = index[batch * batch_size + i]
-                    except IndexError:
-                        return
-
-                    im = Image.open(image_file_path)
-                    im = im.convert('RGB')
-                    im = im.resize(target_size, resample=Image.LANCZOS)
-                    im = np.asarray(im, dtype=np.float32)
-
-                    if pre_processing_function:
-                        im = pre_processing_function(im.copy())
-
+                    im, label, group = self.__getitem__(batch * batch_size + i)
                     image_batch.append(im)
-                    label_batch.append(identity_matrix[group])
+                    label_batch.append(group)
 
                 yield np.asarray(image_batch), np.asarray(label_batch)
 
         while True:
-            identity_matrix = np.eye(len(self._groups))
             random.shuffle(index)
-
             yield from epoch()
 
     def reset(self, data_dirs):
-        self.__init__(data_dirs)
+        self.__init__(data_dirs, self.target_size)
+
+    def pre_process_image(self, im):
+        im = im.resize(self.target_size, resample=Image.LANCZOS)
+        im = np.asarray(im, dtype=np.float32)
+
+        return xception.preprocess_input(im.copy())
+
+    def __getitem__(self, index):
+        image_file_path, label, group = self.index[index]
+
+        im = Image.open(image_file_path)
+        im = im.convert('RGB')
+        im = self.transformation_pipeline(im)
+
+        return im, self.identity_matrix_labels[label], self.identity_matrix_groups[group]
+
+    def __len__(self):
+        return len(self.index)
