@@ -37,7 +37,7 @@ img_channels = 3
 # training params
 #
 
-batch_size = 256
+batch_size = 32
 nb_epoch = 150
 
 
@@ -187,7 +187,6 @@ def main():
     model = models.resnet50(pretrained=True)
     model = nn.DataParallel(model).cuda()
 
-    criterion = nn.CrossEntropyLoss().cuda()
     optimizer = torch.optim.Adam(model.parameters())
 
     cudnn.benchmark = True
@@ -220,6 +219,25 @@ def main():
                                                pin_memory=True)
     valid_loader = torch.utils.data.DataLoader(valid_generator, batch_size=batch_size, shuffle=True, num_workers=4,
                                                pin_memory=True)
+
+    def get_class_weights(nb_samples_per_class):
+        print('Number of samples per class: {}.'.format(nb_samples_per_class))
+
+        weights = {}
+        for cls, nb_samples in nb_samples_per_class.items():
+            weights[cls] = nb_samples_per_class.get(0) / nb_samples
+
+        _weights = []
+        for cls in sorted(weights.keys()):
+            _weights.append(weights.get(cls))
+
+        return torch.FloatTensor(_weights)
+
+    # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
+    class_weights = get_class_weights(train_generator.label_sizes)
+    print(class_weights)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights).cuda()
 
     #
     # train

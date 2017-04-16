@@ -150,7 +150,7 @@ class ImageGenerator(object):
         im = im.convert('RGB')
         im = self.transformation_pipeline(im)
 
-        return im, self.identity_matrix_groups[group]
+        return im, group
 
     def __len__(self):
         return len(self.index)
