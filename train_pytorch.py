@@ -105,7 +105,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   data_time=data_time, loss=losses, top1=top1, top5=top5))
 
             with open(log_file_path, 'a') as f:
-                f.write(st)
+                f.write('{}\n'.format(st))
 
             print(st)
 
