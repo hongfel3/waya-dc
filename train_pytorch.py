@@ -25,6 +25,8 @@ data_dir = os.path.join(path, 'data')
 valid_dir = 'data-scraped-dermnetnz'
 model_checkpoint = os.path.join(cache_dir, 'model_checkpoint.tar')
 
+log_file_path = 'train_log.txt'
+
 #
 # image dimensions
 #
@@ -93,15 +95,19 @@ def train(train_loader, model, criterion, optimizer, epoch):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % 10 == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
+        if i % 100 == 0:
+            st = ('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                epoch, i, len(train_loader), batch_time=batch_time,
-                data_time=data_time, loss=losses, top1=top1, top5=top5))
+                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(epoch, i, len(train_loader), batch_time=batch_time,
+                  data_time=data_time, loss=losses, top1=top1, top5=top5))
+
+            with open(log_file_path, 'a') as f:
+                f.write(st)
+
+            print(st)
 
 
 def valid(val_loader, model, criterion):
@@ -230,6 +236,10 @@ def main():
         _weights = []
         for cls in sorted(weights.keys()):
             _weights.append(weights.get(cls))
+
+        # pytorch bug workaround
+        while len(_weights) != 1000:
+            _weights.append(0.0)
 
         return torch.FloatTensor(_weights)
 
