@@ -154,7 +154,7 @@ def valid(val_loader, model, criterion):
 
 
 def accuracy(output, target, topk=(1,)):
-    assert batch_size == target.size(0)
+    batch_size = target.size(0)
 
     maxk = max(topk)
     _, pred = output.topk(maxk, 1, True, True)
