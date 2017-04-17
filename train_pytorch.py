@@ -102,7 +102,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(epoch, i, len(train_loader), batch_time=batch_time,
-                  data_time=data_time, loss=losses, top1=top1, top5=top5))
+                   data_time=data_time, loss=losses, top1=top1, top5=top5))
 
             with open(log_file_path, 'a') as f:
                 f.write('{}\n'.format(st))
@@ -140,7 +140,7 @@ def valid(val_loader, model, criterion):
         end = time.time()
 
         if i % 10 == 0:
-            print('Test: [{0}/{1}]\t'
+            st = ('Test: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
@@ -148,7 +148,17 @@ def valid(val_loader, model, criterion):
                 i, len(val_loader), batch_time=batch_time, loss=losses,
                 top1=top1, top5=top5))
 
-    print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+            with open(log_file_path, 'a') as f:
+                f.write('{}\n'.format(st))
+
+            print(st)
+
+    st = (' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+
+    with open(log_file_path, 'a') as f:
+        f.write('{}\n'.format(st))
+
+    print(st)
 
     return top1.avg
 
@@ -185,17 +195,6 @@ def main():
     assert not train_dirs.intersection(valid_dirs)
 
     print(train_dirs, valid_dirs)
-
-    #
-    # set up model
-    #
-
-    model = models.resnet50(pretrained=True)
-    model = nn.DataParallel(model).cuda()
-
-    optimizer = torch.optim.Adam(model.parameters())
-
-    cudnn.benchmark = True
 
     #
     # set up data loaders
@@ -237,17 +236,25 @@ def main():
         for cls in sorted(weights.keys()):
             _weights.append(weights.get(cls))
 
-        # pytorch bug workaround
-        while len(_weights) != 1000:
-            _weights.append(0.0)
-
         return torch.FloatTensor(_weights)
 
     # our classes are imbalanced so we need `class_weights` to scale the loss appropriately
     class_weights = get_class_weights(train_generator.label_sizes)
     print(class_weights)
 
+    #
+    # set up model
+    #
+
+    model = models.resnet50(pretrained=True, num_classes=len(train_generator._groups))
+    model = nn.DataParallel(model).cuda()
+
+    optimizer = torch.optim.Adam(model.parameters())
     criterion = nn.CrossEntropyLoss(weight=class_weights).cuda()
+
+    cudnn.benchmark = True
+
+    print(model)
 
     #
     # train
