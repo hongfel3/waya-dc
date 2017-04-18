@@ -250,9 +250,12 @@ def main():
     nb_features = model.fc.in_features
     model.fc = nn.Linear(nb_features, len(train_generator._groups))
 
+    for param in model.conv1.parameters():
+        param.requires_grad = False
+
     model = nn.DataParallel(model).cuda()
 
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()))
     criterion = nn.CrossEntropyLoss(weight=class_weights).cuda()
 
     cudnn.benchmark = True
