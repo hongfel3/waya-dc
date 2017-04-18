@@ -246,7 +246,10 @@ def main():
     # set up model
     #
 
-    model = models.resnet50(pretrained=True, num_classes=len(train_generator._groups))
+    model = models.resnet50(pretrained=True)
+    nb_features = model.fc.in_features
+    model.fc = nn.Linear(nb_features, len(train_generator._groups))
+
     model = nn.DataParallel(model).cuda()
 
     optimizer = torch.optim.Adam(model.parameters())
