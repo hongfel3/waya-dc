@@ -39,7 +39,7 @@ img_channels = 3
 # training params
 #
 
-batch_size = 32
+batch_size = 96
 nb_epoch = 150
 
 
@@ -62,7 +62,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
-    top5 = AverageMeter()
+    top3 = AverageMeter()
 
     # switch to train mode
     model.train()
@@ -81,10 +81,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        prec1, prec3 = accuracy(output.data, target, topk=(1, 3))
         losses.update(loss.data[0], input_batch.size(0))
         top1.update(prec1[0], input_batch.size(0))
-        top5.update(prec5[0], input_batch.size(0))
+        top3.update(prec3[0], input_batch.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -101,8 +101,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(epoch, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses, top1=top1, top5=top5))
+                  'Prec@3 {top3.val:.3f} ({top3.avg:.3f})'.format(epoch, i, len(train_loader), batch_time=batch_time,
+                   data_time=data_time, loss=losses, top1=top1, top3=top3))
 
             with open(log_file_path, 'a') as f:
                 f.write('{}\n'.format(st))
@@ -114,7 +114,7 @@ def valid(val_loader, model, criterion):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
-    top5 = AverageMeter()
+    top3 = AverageMeter()
 
     # switch to evaluate mode
     model.eval()
@@ -130,10 +130,10 @@ def valid(val_loader, model, criterion):
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        prec1, prec3 = accuracy(output.data, target, topk=(1, 3))
         losses.update(loss.data[0], input_batch.size(0))
         top1.update(prec1[0], input_batch.size(0))
-        top5.update(prec5[0], input_batch.size(0))
+        top3.update(prec3[0], input_batch.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -144,16 +144,16 @@ def valid(val_loader, model, criterion):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                  'Prec@3 {top3.val:.3f} ({top3.avg:.3f})'.format(
                 i, len(val_loader), batch_time=batch_time, loss=losses,
-                top1=top1, top5=top5))
+                top1=top1, top3=top3))
 
             with open(log_file_path, 'a') as f:
                 f.write('{}\n'.format(st))
 
             print(st)
 
-    st = (' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+    st = (' * Prec@1 {top1.avg:.3f} Prec@3 {top3.avg:.3f}'.format(top1=top1, top3=top3))
 
     with open(log_file_path, 'a') as f:
         f.write('{}\n'.format(st))
