@@ -253,6 +253,15 @@ def main():
     for param in model.conv1.parameters():
         param.requires_grad = False
 
+    for param in model.bn1.parameters():
+        param.requires_grad = False
+
+    for param in model.layer1.parameters():
+        param.requires_grad = False
+
+    for param in model.layer2.parameters():
+        param.requires_grad = False
+
     model = nn.DataParallel(model).cuda()
 
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()))
