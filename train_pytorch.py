@@ -39,7 +39,7 @@ img_channels = 3
 # training params
 #
 
-batch_size = 96
+batch_size = 64
 nb_epoch = 150
 
 
@@ -298,7 +298,7 @@ def main():
                 output = model(input_var)
 
                 for i, (o, t) in enumerate(zip(output.data, target)):
-                    _, pred = o.topk(3, 1, True, True)
+                    _, pred = o.topk(3, 0, True, True)
                     if set(pred).intersection({t}):
                         index.append(image_details[i])
 

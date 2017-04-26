@@ -58,7 +58,7 @@ class ImageGenerator(object):
                 for image_file_path, class_index, group_index in data_dir[1]:
                     self.label_sizes[group_index] = self.label_sizes.get(group_index, 0) + 1
                     self.index.append((image_file_path, class_index, group_index))
-                    continue
+                continue
 
             image_details_file_path = os.path.join(data_dir, 'image_details.pickle')
 
