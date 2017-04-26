@@ -305,19 +305,13 @@ def main():
                         index.append(image_details[i])
 
             print(len(index))
+            _train_dirs = train_dirs.copy()
+            _train_dirs.add(('data-scraped-noisy', index))
 
-            train_dirs.add(('data-scraped-noisy', index))
-
-            train_generator = image_generator.ImageGenerator(train_dirs, target_size=(img_height, img_width),
+            train_generator = image_generator.ImageGenerator(_train_dirs, target_size=(img_height, img_width),
                                                              transformation_pipeline=train_transform)
-            valid_generator = image_generator.ImageGenerator(valid_dirs, target_size=(img_height, img_width),
-                                                             transformation_pipeline=valid_transform)
-            assert train_generator._groups == valid_generator._groups
 
             train_loader = torch.utils.data.DataLoader(train_generator, batch_size=batch_size, shuffle=True,
-                                                       num_workers=4,
-                                                       pin_memory=True)
-            valid_loader = torch.utils.data.DataLoader(valid_generator, batch_size=batch_size, shuffle=True,
                                                        num_workers=4,
                                                        pin_memory=True)
 

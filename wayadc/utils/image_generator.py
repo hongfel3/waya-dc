@@ -107,9 +107,9 @@ class ImageGenerator(object):
 
             print('Discarded: {}.'.format(nb_discarded))
 
-        for label in self._labels:
-            label_index = self._labels.index(label)
-            self.label_sizes[label_index] = self.label_sizes.get(label_index, 0)
+        for group in self._groups:
+            group_index = self._groups.index(group)
+            self.label_sizes[group_index] = self.label_sizes.get(group_index, 1)
 
         print('Found {} images belonging to {} labels and {} groups.'.format(len(self.index), len(self._labels), len(self._groups)))
 
