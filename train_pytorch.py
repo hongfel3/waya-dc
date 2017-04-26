@@ -282,7 +282,7 @@ def main():
     #
 
     for epoch in range(nb_epoch):
-        if not epoch % 3 and epoch != 0:
+        if epoch > 12:
             index = []
 
             model.eval()
@@ -291,26 +291,23 @@ def main():
 
             for image_batch, label_batch, image_details in noisy_generator.image_generator(batch_size, single_epoch=True):
                 input_batch = torch.stack(image_batch, 0)
-                target = torch.stack(label_batch, 0)
+                target = torch.LongTensor(label_batch)
 
-                target = target.cuda(async=True)
                 input_var = torch.autograd.Variable(input_batch, volatile=True)
 
-                # compute output
                 output = model(input_var)
-                for i, o, t in enumerate(zip(output.data, target)):
+
+                for i, (o, t) in enumerate(zip(output.data, target)):
                     _, pred = o.topk(3, 1, True, True)
-                    _, true = t.topk(1, 1, True, True)
-                    if set(pred).intersection(set(true)):
+                    if set(pred).intersection({t}):
                         index.append(image_details[i])
 
             print(len(index))
-            _train_dirs = train_dirs.copy()
-            _train_dirs.add(('data-scraped-noisy', index))
+            _train_dirs = list(train_dirs)
+            _train_dirs.append(('data-scraped-noisy', index))
 
             train_generator = image_generator.ImageGenerator(_train_dirs, target_size=(img_height, img_width),
                                                              transformation_pipeline=train_transform)
-
             train_loader = torch.utils.data.DataLoader(train_generator, batch_size=batch_size, shuffle=True,
                                                        num_workers=4,
                                                        pin_memory=True)
