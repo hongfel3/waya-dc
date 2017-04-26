@@ -185,16 +185,22 @@ def main():
     #
 
     train_dirs = set()
+    noisy_dirs = set()
     for dataset_dir in helpers.list_dir(data_dir, sub_dirs_only=True):
         if dataset_dir == valid_dir or not dataset_dir.startswith('data-scraped-'):
             continue
 
-        train_dirs.add(os.path.join(data_dir, dataset_dir))
+        dataset_dir_path = os.path.join(data_dir, dataset_dir)
+        if 'search' in dataset_dir:
+            noisy_dirs.add(dataset_dir_path)
+            continue
+
+        train_dirs.add(dataset_dir_path)
 
     valid_dirs = {os.path.join(data_dir, valid_dir)}
     assert not train_dirs.intersection(valid_dirs)
 
-    print(train_dirs, valid_dirs)
+    print(train_dirs, valid_dirs, noisy_dirs)
 
     #
     # set up data loaders
@@ -276,6 +282,45 @@ def main():
     #
 
     for epoch in range(nb_epoch):
+        if not epoch % 3 and epoch != 0:
+            index = []
+
+            model.eval()
+            noisy_generator = image_generator.ImageGenerator(noisy_dirs, target_size=(img_height, img_width),
+                                                             transformation_pipeline=valid_transform)
+
+            for image_batch, label_batch, image_details in noisy_generator.image_generator(batch_size, single_epoch=True):
+                input_batch = torch.stack(image_batch, 0)
+                target = torch.stack(label_batch, 0)
+
+                target = target.cuda(async=True)
+                input_var = torch.autograd.Variable(input_batch, volatile=True)
+
+                # compute output
+                output = model(input_var)
+                for i, o, t in enumerate(zip(output.data, target)):
+                    _, pred = o.topk(3, 1, True, True)
+                    _, true = t.topk(1, 1, True, True)
+                    if set(pred).intersection(set(true)):
+                        index.append(image_details[i])
+
+            print(len(index))
+
+            train_dirs.add(('data-scraped-noisy', index))
+
+            train_generator = image_generator.ImageGenerator(train_dirs, target_size=(img_height, img_width),
+                                                             transformation_pipeline=train_transform)
+            valid_generator = image_generator.ImageGenerator(valid_dirs, target_size=(img_height, img_width),
+                                                             transformation_pipeline=valid_transform)
+            assert train_generator._groups == valid_generator._groups
+
+            train_loader = torch.utils.data.DataLoader(train_generator, batch_size=batch_size, shuffle=True,
+                                                       num_workers=4,
+                                                       pin_memory=True)
+            valid_loader = torch.utils.data.DataLoader(valid_generator, batch_size=batch_size, shuffle=True,
+                                                       num_workers=4,
+                                                       pin_memory=True)
+
         best_precision = 0
 
         train(train_loader, model, criterion, optimizer, epoch)

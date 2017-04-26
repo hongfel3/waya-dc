@@ -21,12 +21,10 @@ def pre_process_diagnosis_name(diagnosis_name):
     return re.sub(r'_+', ' ', tmp)
 
 
-# TODO: `valid_split` not working
 class ImageGenerator(object):
-    def __init__(self, data_dirs, target_size, transformation_pipeline=None, valid_split=None):
+    def __init__(self, data_dirs, target_size, transformation_pipeline=None):
         self.target_size = target_size
         self.transformation_pipeline = transformation_pipeline
-        self.valid_split = valid_split
 
         self.index = []
         self.label_sizes = {}
@@ -55,6 +53,13 @@ class ImageGenerator(object):
         self.identity_matrix_groups = np.eye(len(self._groups))
 
         for data_dir in data_dirs:
+            if isinstance(data_dir, tuple):
+                print(data_dir[0])
+                for image_file_path, class_index, group_index in data_dir[1]:
+                    self.label_sizes[group_index] = self.label_sizes.get(group_index, 0) + 1
+                    self.index.append((image_file_path, class_index, group_index))
+                    continue
+
             image_details_file_path = os.path.join(data_dir, 'image_details.pickle')
 
             with open(image_details_file_path, 'rb') as handle:
@@ -102,37 +107,37 @@ class ImageGenerator(object):
 
             print('Discarded: {}.'.format(nb_discarded))
 
+        for label in self._labels:
+            label_index = self._labels.index(label)
+            self.label_sizes[label_index] = self.label_sizes.get(label_index, 0)
+
         print('Found {} images belonging to {} labels and {} groups.'.format(len(self.index), len(self._labels), len(self._groups)))
 
-        if self.valid_split:
-            x = int(len(self.index) * valid_split)
-            random.shuffle(self.index)
-
-            self.index = self.index[x:]
-            self.valid_index = self.index[:x]
-
-    def image_generator(self, batch_size, valid=False):
-        if valid:
-            assert self.valid_split
-            index = self.valid_index
-        else:
-            index = self.index
+    def image_generator(self, batch_size, single_epoch=False):
+        index = self.index
 
         def epoch():
             for batch in range(len(index) // batch_size):
                 image_batch = []
                 label_batch = []
+                image_details = []
 
                 for i in range(batch_size):
-                    im, group = self.__getitem__(batch * batch_size + i)
+                    idx = batch * batch_size + i
+                    image_file_path, label, group = self.index[idx]
+
+                    im, group = self.__getitem__(idx)
                     image_batch.append(im)
                     label_batch.append(group)
+                    image_details.append((image_file_path, label, group))
 
-                yield np.asarray(image_batch), np.asarray(label_batch)
+                yield np.asarray(image_batch), np.asarray(label_batch), image_details
 
         while True:
             random.shuffle(index)
             yield from epoch()
+            if single_epoch:
+                raise StopIteration
 
     def reset(self, data_dirs):
         self.__init__(data_dirs, self.target_size)
